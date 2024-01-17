@@ -92,7 +92,7 @@ class BluetoothConnection {
   }
 
   static Future<BluetoothConnection> toAddressBLE(String? address) async {
-    return BleBluetoothConnection(address);
+    return BleBluetoothConnection(address!);
   }
 
   static Future<BluetoothConnection> toAddressOldBLE(String? address) async {
