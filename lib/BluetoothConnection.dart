@@ -3,6 +3,7 @@ part of flutter_bluetooth_serial_ble;
 enum ConnectionType {
   CLASSIC,
   BLE,
+  OLD_BLE,
   /// Try BT classic, then on failure try BLE
   AUTO,
   /// Try BLE, then on failure try BT classic
@@ -85,10 +86,16 @@ class BluetoothConnection {
         return toAddressBC(address);
       case ConnectionType.BLE:
         return toAddressBLE(address);
+      case ConnectionType.OLD_BLE:
+        return toAddressBLE(address);
     }
   }
 
   static Future<BluetoothConnection> toAddressBLE(String? address) async {
+    return BleBluetoothConnection(address);
+  }
+
+  static Future<BluetoothConnection> toAddressOldBLE(String? address) async {
     // Sorry for pseudo-factory, but `factory` keyword disallows `Future`.
     return BluetoothConnection._consumeConnectionID(await FlutterBluetoothSerial
         ._methodChannel

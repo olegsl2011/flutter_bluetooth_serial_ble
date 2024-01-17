@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
+import 'package:flutter_bluetooth_serial_ble/BleBluetoothConnection.dart';
 
 part './BluetoothState.dart';
 part './BluetoothBondState.dart';
