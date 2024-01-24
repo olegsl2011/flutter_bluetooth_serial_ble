@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:developer';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter_bluetooth_serial_ble/BluetoothConnectionTracker.dart';
@@ -8,6 +10,8 @@ import 'package:quick_blue/quick_blue.dart';
 
 //DUMMY Go back through and check for unused functions; those are probably ones I forgot to use in callbacks
 
+//DUMMY I don't yet know what to do about the original interleaving of data and errors; streams don't support that
+
 class BleBluetoothConnection implements BluetoothConnection {
   @override
   Stream<Uint8List>? input;
@@ -15,6 +19,7 @@ class BleBluetoothConnection implements BluetoothConnection {
   @override
   var output;
 
+  bool _manuallyDisconnected = false;
   final String address;
 
   BleBluetoothConnection(this.address) {
@@ -24,6 +29,7 @@ class BleBluetoothConnection implements BluetoothConnection {
 
     BluetoothCallbackTracker.INSTANCE.connect(address);
     asdf; //DUMMY Other callbacks?
+    //DUMMY There was a disconnectCallbackReceiver....
   }
 
   @override
@@ -80,47 +86,23 @@ class BleBluetoothConnection implements BluetoothConnection {
     static final int _DEFAULT_MTU = 23;
     static final String _TAG = "SerialSocket";
 
-    final List<Uint8List> _writeBuffer;
-    final IntentFilter _pairingIntentFilter;
-    final BroadcastReceiver _pairingBroadcastReceiver;
-    final BroadcastReceiver _disconnectBroadcastReceiver;
+    final List<Uint8List> _writeBuffer = <Uint8List>[];
 
     SerialListener _listener;
-    DeviceDelegate _delegate;
-    String _readService, _writeService; //DUMMY Make sure to set these
-    String _readCharacteristic, _writeCharacteristic;
+    _DeviceDelegate? _delegate;
+    String? _readService, _writeService; //DUMMY Make sure to set these
+    String? _readCharacteristic, _writeCharacteristic;
 
     bool _writePending;
     bool _canceled;
     bool _connected;
     int _payloadSize = _DEFAULT_MTU-3;
 
-    SerialSocket(Context context, BluetoothDevice device) : _writeBuffer = <Uint8List>[] {
-        this.device = device;
-        pairingIntentFilter = new IntentFilter();
-        pairingIntentFilter.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
-        pairingIntentFilter.addAction(BluetoothDevice.ACTION_PAIRING_REQUEST);
-        pairingBroadcastReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                _onPairingBroadcastReceive(context, intent);
-            }
-        };
-        disconnectBroadcastReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                if(_listener != null)
-                    _listener.onSerialIoError(Exception("background disconnect"));
-                disconnect(); // disconnect now, else would be queued until UI re-attached
-            }
-        };
-    }
-
     void disconnect() {
-      asdf;
+        asdf;
         log("disconnect");
         _listener = null; // ignore remaining data and errors
-        _device = null;
+        // address = null;
         _canceled = true;
         _servicesTimeout.reset();
         _services = {};
@@ -133,72 +115,24 @@ class BleBluetoothConnection implements BluetoothConnection {
         _writeCharacteristic = null;
         if (_delegate != null)
             _delegate.disconnect();
-        if (gatt != null) {
-            log("gatt.disconnect");
-            gatt.disconnect();
-            log("gatt.close");
-            try {
-                gatt.close();
-            } catch (Exception ignored) {}
-            gatt = null;
-            _connected = false;
-        }
-        try {
-            context.unregisterReceiver(pairingBroadcastReceiver);
-        } catch (Exception ignored) {
-        }
-        try {
-            context.unregisterReceiver(disconnectBroadcastReceiver);
-        } catch (Exception ignored) {
-        }
+        //THINK ...Should it await?
+        unawaited(BluetoothCallbackTracker.INSTANCE.disconnect(address));
+        _connected = false;
+        //DUMMY Unregister disconnectBroadcastReceiver, whatever that ends up meaning
     }
 
     /**
      * connect-success and most connect-errors are returned asynchronously to listener
      */
-    void connect(SerialListener listener) throws IOException {
-        if(_connected || gatt != null)
+    Future<void> connect(SerialListener listener) async {
+        if(_connected || _manuallyDisconnected) // I don't know what the result would be of permitting you to reconnect; it seems like the original code was written not to allow that.
             throw Exception("already connected");
         _canceled = false;
         this._listener = listener;
-        context.registerReceiver(disconnectBroadcastReceiver, new IntentFilter(Constants.INTENT_ACTION_DISCONNECT));
-        log("connect $_device");
-        context.registerReceiver(pairingBroadcastReceiver, pairingIntentFilter);
-        if (Build.VERSION.SDK_INT < 23) {
-            log("connectGatt");
-            gatt = _device.connectGatt(context, false, this);
-        } else {
-            log("connectGatt,LE");
-            gatt = _device.connectGatt(context, false, this, BluetoothDevice.TRANSPORT_LE);
-        }
-        if (gatt == null)
-            throw Exception("connectGatt failed");
+        //DUMMY There was ALSO a disconnectBroadcastReceiver here??
+        log("connect $address");
+        await BluetoothCallbackTracker.INSTANCE.connect(address);
         // continues asynchronously in onPairingBroadcastReceive() and onConnectionStateChange()
-    }
-
-    void _onPairingBroadcastReceive() {
-      asdf;
-        // for ARM Mbed, Microbit, ... use pairing from Android bluetooth settings
-        // for HM10-clone, ... pairing is initiated here
-        BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-        if(device==null || !device.equals(this._device))
-            return;
-        switch (intent.getAction()) {
-            case BluetoothDevice.ACTION_PAIRING_REQUEST:
-                final int pairingVariant = intent.getIntExtra(BluetoothDevice.EXTRA_PAIRING_VARIANT, -1);
-                log("pairing request " + pairingVariant);
-                onSerialConnectError(new IOException("Pairing requested: pair and connect again"));
-                // pairing dialog brings app to background (onPause), but it is still partly visible (no onStop), so there is no automatic disconnect()
-                break;
-            case BluetoothDevice.ACTION_BOND_STATE_CHANGED:
-                final int bondState = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, -1);
-                final int previousBondState = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, -1);
-                log("bond state " + previousBondState + "->" + bondState);
-                break;
-            default:
-                log("unknown broadcast " + intent.getAction());
-                break;
-        }
     }
 
     //SHAME Turns out you're allowed to have multiple characteristics with the same UUID (bleh), and this does not accommodate that.
@@ -281,7 +215,7 @@ class BleBluetoothConnection implements BluetoothConnection {
 
     void _connectCharacteristics2() {
         if (false) {
-            //DUMMY Try to set max MTU.  I don't trust QuickBlue's one-channel notification stream under the hood.
+            //DUMMY Try to set max MTU.  But I don't trust QuickBlue's one-channel notification stream under the hood.
             // log("request max MTU");
             // if (!gatt.requestMtu(_MAX_MTU))
             //     _onSerialConnectError(Exception("request MTU failed"));
@@ -311,26 +245,30 @@ class BleBluetoothConnection implements BluetoothConnection {
         //     _onSerialConnectError(Exception("write characteristic not writable"));
         //     return;
         // }
-        BluetoothCallbackTracker.INSTANCE.subscribeForCharacteristicValues(address, _readCharacteristic).listen((event) {
-            asdf;
+
+        // I've opted for async, here, but it's possible it should have been sync
+        BluetoothCallbackTracker.INSTANCE.subscribeForCharacteristicValues(address, _readCharacteristic!).listen((event) {
+            onCharacteristicChanged(_readCharacteristic!, event);
         }).onError((e, s) {
             _onSerialConnectError(Exception("no notification for read characteristic, or read error"));
         }); //THINK Maybe onDone?
         //CHECK Should this fall back to INDICATE on failure?
         log("enable read notification....");
-        BluetoothCallbackTracker.INSTANCE.setNotifiable(address, _readService, _readCharacteristic, BleInputProperty.notification).onError((e, s) async {
-            _onSerialConnectError(Exception("no notification for read characteristic"));
+        BluetoothCallbackTracker.INSTANCE.setNotifiable(address, _readService!, _readCharacteristic!, BleInputProperty.notification).then((value) async {
+            onDescriptorWrite(_readCharacteristic!, true);
+        }, onError: (e, s) async {
+            onDescriptorWrite(_readCharacteristic!, false);
+            _onSerialConnectError(Exception("no notification for read characteristic")); // This may be redundant
         });
-        // continues asynchronously in onDescriptorWrite()
     }
 
-    void onDescriptorWrite(BluetoothGattDescriptor descriptor, int status) {
-        _delegate.onDescriptorWrite(gatt, descriptor, status);
+    void onDescriptorWrite(String characteristic, bool success) {
+        _delegate.onDescriptorWrite(characteristic, success);
         if(_canceled)
             return;
-        if(descriptor.getCharacteristic() == _readCharacteristic) {
-            log("writing read characteristic descriptor finished, status=$status");
-            if (status != BluetoothGatt.GATT_SUCCESS) {
+        if(characteristic == _readCharacteristic) {
+            log("writing read characteristic descriptor finished, success=$success");
+            if (!success) {
                 _onSerialConnectError(Exception("write descriptor failed"));
             } else {
                 // onCharacteristicChanged with incoming data can happen after writeDescriptor(ENABLE_INDICATION/NOTIFICATION)
@@ -345,15 +283,13 @@ class BleBluetoothConnection implements BluetoothConnection {
     /*
      * read
      */
-    void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
-      asdf;
+    void onCharacteristicChanged(String characteristic, Uint8List data) { //DUMMY Check this is called where it should be
         if(_canceled)
             return;
-        _delegate.onCharacteristicChanged(gatt, characteristic);
+        _delegate.onCharacteristicChanged(characteristic, data);
         if(_canceled)
             return;
         if(characteristic == _readCharacteristic) { // NOPMD - test object identity
-            Uint8List data = _readCharacteristic.getValue();
             _onSerialRead(data);
             log("read, len=${data.length}");
         }
@@ -362,16 +298,15 @@ class BleBluetoothConnection implements BluetoothConnection {
     /*
      * write
      */
-    void write(Uint8List data) throws IOException {
-      asdf;
+    Future<void> write(Uint8List data) async { //DUMMY Check asyncs
         if(_canceled || !_connected || _writeCharacteristic == null)
             throw Exception("not connected");
-        Uint8List data0;
+        Uint8List? data0;
         // synchronized (writeBuffer) {
             if(data.length <= _payloadSize) {
                 data0 = data;
             } else {
-                data0 = Arrays.copyOfRange(data, 0, _payloadSize);
+                data0 = data.sublist(0, _payloadSize);
             }
             if(!_writePending && _writeBuffer.isEmpty && _delegate.canWrite()) {
                 _writePending = true;
@@ -383,41 +318,43 @@ class BleBluetoothConnection implements BluetoothConnection {
             if(data.length > _payloadSize) {
                 for(int i=1; i<(data.length+_payloadSize-1)/_payloadSize; i++) {
                     int from = i*_payloadSize;
-                    int to = Math.min(from+_payloadSize, data.length);
-                    _writeBuffer.add(Arrays.copyOfRange(data, from, to));
+                    int to = math.min(from+_payloadSize, data.length);
+                    _writeBuffer.add(data.sublist(from, to));
                     log("write queued, len=${to-from}");
                 }
             }
         // }
         if(data0 != null) {
-            _writeCharacteristic.setValue(data0);
-            if (!gatt.writeCharacteristic(_writeCharacteristic)) {
-                _onSerialIoError(Exception("write failed"));
-            } else {
+            try {
+                //DUMMY "true, if the write operation was initiated successfully" so, make async again I guess
+                await BluetoothCallbackTracker.INSTANCE.writeValue(address, _writeService!, _writeCharacteristic!, data0);
                 log("write started, len=${data0.length}");
+            } catch (e, s) {
+                _onSerialIoError(Exception("write failed"));
             }
         }
         // continues asynchronously in onCharacteristicWrite()
+        //DUMMY It probably doesn't
     }
 
-    void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
-      asdf;
+    //DUMMY Make sure this gets called in the places it needs to
+    void onCharacteristicWrite(String characteristic, bool success) {
         if(_canceled || !_connected || _writeCharacteristic == null)
             return;
-        if(status != BluetoothGatt.GATT_SUCCESS) {
+        if(!success) {
             _onSerialIoError(Exception("write failed"));
             return;
         }
-        _delegate.onCharacteristicWrite(gatt, characteristic, status);
+        _delegate.onCharacteristicWrite(characteristic, success);
         if(_canceled)
             return;
         if(characteristic == _writeCharacteristic) { // NOPMD - test object identity
-            log("write finished, status=$status");
-            _writeNext();
+            log("write finished, success=$success");
+            await _writeNext();
         }
     }
 
-    void _writeNext() {
+    Future<void> _writeNext() async { //DUMMY propagate async
         final Uint8List data;
         // synchronized (writeBuffer) {
             if (!_writeBuffer.isEmpty && _delegate.canWrite()) {
@@ -428,11 +365,11 @@ class BleBluetoothConnection implements BluetoothConnection {
                 return;
             }
         // }
-        _writeCharacteristic.setValue(data);
-        if (!gatt.writeCharacteristic(_writeCharacteristic)) {
-            _onSerialIoError(Exception("write failed"));
-        } else {
+        try {
+            await BluetoothCallbackTracker.INSTANCE.writeValue(address, _writeService!, _writeCharacteristic!, data);
             log("write started, len=${data.length}");
+        } catch (e, s) {
+            _onSerialIoError(Exception("write failed"));
         }
     }
 
@@ -475,8 +412,8 @@ class _DeviceDelegate {
     bool connectCharacteristics(String service) { return true; }
     // following methods only overwritten for Telit devices
     void onDescriptorWrite(String characteristic, bool success) { /*nop*/ }
-    void onCharacteristicChanged(String c) {/*nop*/ }
-    void onCharacteristicWrite(String c, int status) { /*nop*/ }
+    void onCharacteristicChanged(String c, Uint8List data) {/*nop*/ }
+    void onCharacteristicWrite(String c, bool success) { /*nop*/ }
     bool canWrite() { return true; }
     void disconnect() {/*nop*/ }
 }
@@ -607,9 +544,9 @@ class _TelitDelegate extends _DeviceDelegate {
     }
 
     @override
-    Future<void> onCharacteristicChanged(String characteristic) async {
+    Future<void> onCharacteristicChanged(String characteristic, Uint8List data) async {
         if(characteristic == _readCreditsCharacteristic) { // NOPMD - test object identity
-            int newCredits = (await BluetoothCallbackTracker.INSTANCE.readValue(owner.address, owner._readService, _readCreditsCharacteristic!))[0];
+            int newCredits = data[0];
             // synchronized (writeBuffer) {
                 _writeCredits += newCredits;
             // }
@@ -617,7 +554,7 @@ class _TelitDelegate extends _DeviceDelegate {
 
             if (!owner._writePending && owner._writeBuffer.isNotEmpty) {
                 log("resume blocked write");
-                owner._writeNext();
+                await owner._writeNext();
             }
         }
         if(characteristic == owner._readCharacteristic) { // NOPMD - test object identity
@@ -627,7 +564,7 @@ class _TelitDelegate extends _DeviceDelegate {
     }
 
     @override
-    void onCharacteristicWrite(String characteristic, int status) {
+    void onCharacteristicWrite(String characteristic, bool success) {
         if(characteristic == owner._writeCharacteristic) { // NOPMD - test object identity
             // synchronized (owner._writeBuffer) {
                 if (_writeCredits > 0)
@@ -636,7 +573,7 @@ class _TelitDelegate extends _DeviceDelegate {
             log("write finished, credits=$_writeCredits");
         }
         if(characteristic == _writeCreditsCharacteristic) { // NOPMD - test object identity
-            log("write credits finished, status=$status");
+            log("write credits finished, success=$success");
         }
     }
 
@@ -665,7 +602,7 @@ class _TelitDelegate extends _DeviceDelegate {
             Uint8List data = Uint8List.fromList([newCredits]);
             log("grant read credits +$newCredits =$_readCredits");
             try {
-                await BluetoothCallbackTracker.INSTANCE.writeValue(owner.address, owner._writeService, _writeCreditsCharacteristic!, data);
+                await BluetoothCallbackTracker.INSTANCE.writeValue(owner.address, owner._writeService!, _writeCreditsCharacteristic!, data);
             } catch (e, s) {
                 if(owner._connected)
                     owner._onSerialIoError(Exception("write read credits failed"));
