@@ -2,6 +2,7 @@ import 'dart:developer';
 import 'dart:typed_data';
 
 import 'package:flutter_bluetooth_serial_ble/BluetoothConnectionTracker.dart';
+import 'package:flutter_bluetooth_serial_ble/CountdownTimer.dart';
 import 'package:flutter_bluetooth_serial_ble/flutter_bluetooth_serial_ble.dart';
 import 'package:quick_blue/quick_blue.dart';
 
@@ -17,10 +18,12 @@ class BleBluetoothConnection implements BluetoothConnection {
   final String address;
 
   BleBluetoothConnection(this.address) {
-    QuickBlue.setConnectionHandler(_onConnectionStateChange);
+    BluetoothCallbackTracker.INSTANCE.subscribeForConnectionResults(address).listen((event) {
+      _onConnectionStateChange(address, event);
+    });
 
-    QuickBlue.connect(address);
-    asdf;
+    BluetoothCallbackTracker.INSTANCE.connect(address);
+    asdf; //DUMMY Other callbacks?
   }
 
   @override
@@ -120,6 +123,8 @@ class BleBluetoothConnection implements BluetoothConnection {
         _listener = null; // ignore remaining data and errors
         _device = null;
         _canceled = true;
+        _servicesTimeout.reset();
+        _services = {};
         // synchronized (_writeBuffer)
         {
             _writePending = false;
@@ -197,12 +202,29 @@ class BleBluetoothConnection implements BluetoothConnection {
         }
     }
 
+    //SHAME Turns out you're allowed to have multiple characteristics with the same UUID (bleh), and this does not accommodate that.
+    Map<String, Set<String>> _services = {};
+
+    final _servicesTimeout = CountdownTimer(); //THINK Not sure if class field, or local var
+
     Future<void> _onConnectionStateChange(String deviceId, BlueConnectionState state) async {
         print('_handleConnectionChange $deviceId, $state');
         // status directly taken from gat_api.h, e.g. 133=0x85=GATT_ERROR ~= timeout
         if (state == BlueConnectionState.connected) {
             log("connect status $state, discoverServices");
             try {
+              //DUMMY We should probably cancel this in `disconnect` and so forth
+              BluetoothCallbackTracker.INSTANCE.subscribeForServiceResults(deviceId).listen((event) {
+                var cs = _services[event.a];
+                if (cs == null) {
+                  cs = Set();
+                  _services[event.a] = cs;
+                }
+                cs.addAll(event.b);
+                _servicesTimeout.delay(Duration(milliseconds: 500)).then((value) {
+                  _onServicesDiscovered();
+                }, onError: (e) {});
+              });
               await BluetoothCallbackTracker.INSTANCE.discoverServices(deviceId);
             } catch (e, s) {
               _onSerialConnectError(Exception("discoverServices failed"));
@@ -219,25 +241,23 @@ class BleBluetoothConnection implements BluetoothConnection {
     }
 
     void _onServicesDiscovered() {
-        asdf; // Handle
-        log("servicesDiscovered, status " + status);
+        log("servicesDiscovered, $_services");
         if (_canceled)
             return;
-        _connectCharacteristics1(gatt);
+        _connectCharacteristics1();
     }
 
     void _connectCharacteristics1() {
-      asdf;
         bool sync = true;
         _writePending = false;
-        for (BluetoothGattService gattService in gatt.getServices()) {
-            if (gattService.getUuid().equals(_BLUETOOTH_LE_CC254X_SERVICE))
+        for (String gattService in _services.keys) {
+            if (gattService == _BLUETOOTH_LE_CC254X_SERVICE)
                 _delegate = new _Cc245XDelegate(this);
-            if (gattService.getUuid().equals(_BLUETOOTH_LE_MICROCHIP_SERVICE))
+            if (gattService == _BLUETOOTH_LE_MICROCHIP_SERVICE)
                 _delegate = new _MicrochipDelegate(this);
-            if (gattService.getUuid().equals(_BLUETOOTH_LE_NRF_SERVICE))
+            if (gattService == _BLUETOOTH_LE_NRF_SERVICE)
                 _delegate = new _NrfDelegate(this);
-            if (gattService.getUuid().equals(_BLUETOOTH_LE_TIO_SERVICE))
+            if (gattService == _BLUETOOTH_LE_TIO_SERVICE)
                 _delegate = new _TelitDelegate(this);
 
             if(_delegate != null) {
@@ -248,42 +268,41 @@ class BleBluetoothConnection implements BluetoothConnection {
         if(_canceled)
             return;
         if(_delegate==null || _readCharacteristic==null || _writeCharacteristic==null) {
-            for (BluetoothGattService gattService in gatt.getServices()) {
-                log("service "+gattService.getUuid());
-                for(BluetoothGattCharacteristic characteristic in gattService.getCharacteristics())
-                    log("characteristic "+characteristic.getUuid());
+            for (String gattService in _services.keys) {
+                log("service $gattService");
+                for(String characteristic in _services[gattService] ?? [])
+                    log("characteristic $characteristic");
             }
             _onSerialConnectError(Exception("no serial profile found"));
             return;
         }
         if(sync)
-            _connectCharacteristics2(gatt);
+            _connectCharacteristics2();
     }
 
     void _connectCharacteristics2() {
-      asdf;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            log("request max MTU");
-            if (!gatt.requestMtu(_MAX_MTU))
-                _onSerialConnectError(Exception("request MTU failed"));
-            // continues asynchronously in onMtuChanged
+        if (false) {
+            //DUMMY Try to set max MTU.  I don't trust QuickBlue's one-channel notification stream under the hood.
+            // log("request max MTU");
+            // if (!gatt.requestMtu(_MAX_MTU))
+            //     _onSerialConnectError(Exception("request MTU failed"));
+            // // continues asynchronously in onMtuChanged
         } else {
-            _connectCharacteristics3(gatt);
+            _connectCharacteristics3();
         }
     }
 
-    void onMtuChanged(int mtu, int status) {
-      asdf;
+    void onMtuChanged(int mtu, bool success) {
         log("mtu size $mtu");
-        if(status ==  BluetoothGatt.GATT_SUCCESS) {
+        if(success) {
             _payloadSize = mtu - 3;
             log("payload size $_payloadSize");
         }
-        _connectCharacteristics3(gatt);
+        _connectCharacteristics3();
     }
 
     void _connectCharacteristics3() {
-      asdf;
+        asdf;
         int writeProperties = _writeCharacteristic.getProperties();
         if((writeProperties & (BluetoothGattCharacteristic.PROPERTY_WRITE +     // Microbit,HM10-clone have WRITE
                 BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE)) ==0) { // HM10,TI uart,Telit have only WRITE_NO_RESPONSE
