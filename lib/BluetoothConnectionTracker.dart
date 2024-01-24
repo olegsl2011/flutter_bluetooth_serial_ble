@@ -123,7 +123,7 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
 
     /**
      * Subscribe to any data coming in for a given deviceId and characteristicId.<br/>
-     */
+     */ //DUMMY Should probably support same chars on different services
     Stream<Uint8List> subscribeForCharacteristicValues(String deviceId, String characteristicId) {
         deviceId = _normalizeDevice(deviceId);
         characteristicId = _normalizeService(characteristicId);
@@ -178,12 +178,20 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
         deviceId = _normalizeDevice(deviceId);
         return QuickBlue.disconnect(deviceId);
     }
-    Future<void> readValue(String deviceId, String service, String characteristic) async { //CHECK This deadlocks sometimes.  Timeout all occurrences?
+
+    /**
+     * Note that this just subscribes for one value, then requests a value.
+     * It's possible it will return a value not triggered by the read - but that shouldn't matter for normal cases.
+     * Note also that anything subscribed to the characteristic will get the value, too.
+     */
+    Future<Uint8List> readValue(String deviceId, String service, String characteristic) async { //CHECK This deadlocks sometimes.  Timeout all occurrences?
         await _initialized.wait();
         deviceId = _normalizeDevice(deviceId);
         service = _normalizeService(service);
         characteristic = _normalizeService(characteristic);
-        return QuickBlue.readValue(deviceId, service, characteristic);
+        Future<Uint8List> fVal = subscribeForCharacteristicValues(deviceId, characteristic).first;
+        await QuickBlue.readValue(deviceId, service, characteristic);
+        return await fVal;
     }
     Future<void> writeValue(String deviceId, String service, String characteristic, Uint8List data) async {
         await _initialized.wait();

@@ -87,9 +87,8 @@ class BleBluetoothConnection implements BluetoothConnection {
 
     SerialListener _listener;
     DeviceDelegate _delegate;
-    BluetoothDevice _device;
-    BluetoothGatt _gatt;
-    BluetoothGattCharacteristic _readCharacteristic, _writeCharacteristic;
+    String _readService, _writeService; //DUMMY Make sure to set these
+    String _readCharacteristic, _writeCharacteristic;
 
     bool _writePending;
     bool _canceled;
@@ -287,12 +286,14 @@ class BleBluetoothConnection implements BluetoothConnection {
             // if (!gatt.requestMtu(_MAX_MTU))
             //     _onSerialConnectError(Exception("request MTU failed"));
             // // continues asynchronously in onMtuChanged
+            // onMtuChanged();
         } else {
             _connectCharacteristics3();
         }
     }
 
     void onMtuChanged(int mtu, bool success) {
+        //DUMMY Integrate
         log("mtu size $mtu");
         if(success) {
             _payloadSize = mtu - 3;
@@ -303,41 +304,28 @@ class BleBluetoothConnection implements BluetoothConnection {
 
     void _connectCharacteristics3() {
         asdf;
-        int writeProperties = _writeCharacteristic.getProperties();
-        if((writeProperties & (BluetoothGattCharacteristic.PROPERTY_WRITE +     // Microbit,HM10-clone have WRITE
-                BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE)) ==0) { // HM10,TI uart,Telit have only WRITE_NO_RESPONSE
-            _onSerialConnectError(Exception("write characteristic not writable"));
-            return;
-        }
-        if(!gatt.setCharacteristicNotification(_readCharacteristic,true)) {
+        // // QuickBlue doesn't support getting characteristic properties
+        // int writeProperties = _writeCharacteristic.getProperties();
+        // if((writeProperties & (BluetoothGattCharacteristic.PROPERTY_WRITE +     // Microbit,HM10-clone have WRITE
+        //         BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE)) ==0) { // HM10,TI uart,Telit have only WRITE_NO_RESPONSE
+        //     _onSerialConnectError(Exception("write characteristic not writable"));
+        //     return;
+        // }
+        BluetoothCallbackTracker.INSTANCE.subscribeForCharacteristicValues(address, _readCharacteristic).listen((event) {
+            asdf;
+        }).onError((e, s) {
+            _onSerialConnectError(Exception("no notification for read characteristic, or read error"));
+        }); //THINK Maybe onDone?
+        //CHECK Should this fall back to INDICATE on failure?
+        log("enable read notification....");
+        BluetoothCallbackTracker.INSTANCE.setNotifiable(address, _readService, _readCharacteristic, BleInputProperty.notification).onError((e, s) async {
             _onSerialConnectError(Exception("no notification for read characteristic"));
-            return;
-        }
-        BluetoothGattDescriptor readDescriptor = _readCharacteristic.getDescriptor(_BLUETOOTH_LE_CCCD);
-        if(readDescriptor == null) {
-            _onSerialConnectError(Exception("no CCCD descriptor for read characteristic"));
-            return;
-        }
-        int readProperties = _readCharacteristic.getProperties();
-        if((readProperties & BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0) {
-            log("enable read indication");
-            readDescriptor.setValue(BluetoothGattDescriptor.ENABLE_INDICATION_VALUE);
-        }else if((readProperties & BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0) {
-            log("enable read notification");
-            readDescriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-        } else {
-            _onSerialConnectError(Exception("no indication/notification for read characteristic ($readProperties)"));
-            return;
-        }
-        log("writing read characteristic descriptor");
-        if(!gatt.writeDescriptor(readDescriptor)) {
-            _onSerialConnectError(Exception("read characteristic CCCD descriptor not writable"));
-        }
+        });
         // continues asynchronously in onDescriptorWrite()
     }
 
-    void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
-        delegate.onDescriptorWrite(gatt, descriptor, status);
+    void onDescriptorWrite(BluetoothGattDescriptor descriptor, int status) {
+        _delegate.onDescriptorWrite(gatt, descriptor, status);
         if(_canceled)
             return;
         if(descriptor.getCharacteristic() == _readCharacteristic) {
@@ -483,11 +471,12 @@ class _DeviceDelegate {
 
     _DeviceDelegate(this.owner);
 
-    bool connectCharacteristics(BluetoothGattService s) { return true; }
+    //DUMMY Check that asyncs called properly
+    bool connectCharacteristics(String service) { return true; }
     // following methods only overwritten for Telit devices
-    void onDescriptorWrite(BluetoothGatt g, BluetoothGattDescriptor d, int status) { /*nop*/ }
-    void onCharacteristicChanged(BluetoothGatt g, BluetoothGattCharacteristic c) {/*nop*/ }
-    void onCharacteristicWrite(BluetoothGatt g, BluetoothGattCharacteristic c, int status) { /*nop*/ }
+    void onDescriptorWrite(String characteristic, bool success) { /*nop*/ }
+    void onCharacteristicChanged(String c) {/*nop*/ }
+    void onCharacteristicWrite(String c, int status) { /*nop*/ }
     bool canWrite() { return true; }
     void disconnect() {/*nop*/ }
 }
@@ -500,10 +489,10 @@ class _Cc245XDelegate extends _DeviceDelegate {
     _Cc245XDelegate(BleBluetoothConnection owner) : super(owner);
 
     @override
-    bool connectCharacteristics(BluetoothGattService gattService) {
+    bool connectCharacteristics(String service) {
         log("service cc254x uart");
-        owner._readCharacteristic = gattService.getCharacteristic(BleBluetoothConnection._BLUETOOTH_LE_CC254X_CHAR_RW);
-        owner._writeCharacteristic = gattService.getCharacteristic(BleBluetoothConnection._BLUETOOTH_LE_CC254X_CHAR_RW);
+        owner._readCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_CC254X_CHAR_RW;
+        owner._writeCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_CC254X_CHAR_RW;
         return true;
     }
 }
@@ -512,12 +501,12 @@ class _MicrochipDelegate extends _DeviceDelegate {
     _MicrochipDelegate(BleBluetoothConnection owner) : super(owner);
 
     @override
-    bool connectCharacteristics(BluetoothGattService gattService) {
+    bool connectCharacteristics(String service) {
         log("service microchip uart");
-        owner._readCharacteristic = gattService.getCharacteristic(BleBluetoothConnection._BLUETOOTH_LE_MICROCHIP_CHAR_RW);
-        owner._writeCharacteristic = gattService.getCharacteristic(BleBluetoothConnection._BLUETOOTH_LE_MICROCHIP_CHAR_W);
-        if(owner._writeCharacteristic == null)
-            owner._writeCharacteristic = gattService.getCharacteristic(BleBluetoothConnection._BLUETOOTH_LE_MICROCHIP_CHAR_RW);
+        owner._readCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_MICROCHIP_CHAR_RW;
+        owner._writeCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_MICROCHIP_CHAR_W;
+        if(owner._services[service]?.contains(owner._writeCharacteristic) ?? false)
+            owner._writeCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_MICROCHIP_CHAR_RW;
         return true;
     }
 }
@@ -526,110 +515,101 @@ class _NrfDelegate extends _DeviceDelegate {
     _NrfDelegate(BleBluetoothConnection owner) : super(owner);
 
     @override
-    bool connectCharacteristics(BluetoothGattService gattService) {
+    bool connectCharacteristics(String service) {
         log("service nrf uart");
-        BluetoothGattCharacteristic rw2 = gattService.getCharacteristic(BleBluetoothConnection._BLUETOOTH_LE_NRF_CHAR_RW2);
-        BluetoothGattCharacteristic rw3 = gattService.getCharacteristic(BleBluetoothConnection._BLUETOOTH_LE_NRF_CHAR_RW3);
-        if (rw2 != null && rw3 != null) {
-            int rw2prop = rw2.getProperties();
-            int rw3prop = rw3.getProperties();
-            bool rw2write = (rw2prop & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0;
-            bool rw3write = (rw3prop & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0;
-            log("characteristic properties $rw2prop/$rw3prop");
-            if (rw2write && rw3write) {
-                owner._onSerialConnectError(Exception("multiple write characteristics ($rw2prop/$rw3prop)"));
-            } else if (rw2write) {
+        String rw2 = BleBluetoothConnection._BLUETOOTH_LE_NRF_CHAR_RW2;
+        String rw3 = BleBluetoothConnection._BLUETOOTH_LE_NRF_CHAR_RW3;
+        // if (rw2 != null && rw3 != null) {
+        //     int rw2prop = rw2.getProperties();
+        //     int rw3prop = rw3.getProperties();
+        //     bool rw2write = (rw2prop & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0;
+        //     bool rw3write = (rw3prop & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0;
+        //     log("characteristic properties $rw2prop/$rw3prop");
+        //     if (rw2write && rw3write) {
+        //         owner._onSerialConnectError(Exception("multiple write characteristics ($rw2prop/$rw3prop)"));
+        //     } else if (rw2write) {
+                //DUMMY We don't really have a way of checking whether a characteristic is writable, atm, aside from writing to it.  So this will probably fail in some cases.
                 owner._writeCharacteristic = rw2;
                 owner._readCharacteristic = rw3;
-            } else if (rw3write) {
-                owner._writeCharacteristic = rw3;
-                owner._readCharacteristic = rw2;
-            } else {
-                owner._onSerialConnectError(Exception("no write characteristic ($rw2prop/$rw3prop)"));
-            }
-        }
+        //     } else if (rw3write) {
+        //         owner._writeCharacteristic = rw3;
+        //         owner._readCharacteristic = rw2;
+        //     } else {
+        //         owner._onSerialConnectError(Exception("no write characteristic ($rw2prop/$rw3prop)"));
+        //     }
+        // }
         return true;
     }
 }
 
 class _TelitDelegate extends _DeviceDelegate {
-    BluetoothGattCharacteristic _readCreditsCharacteristic, _writeCreditsCharacteristic;
+    String? _readCreditsCharacteristic, _writeCreditsCharacteristic;
     int _readCredits = 0;
     int _writeCredits = 0;
 
     _TelitDelegate(BleBluetoothConnection owner) : super(owner);
 
     @override
-    bool connectCharacteristics(BluetoothGattService gattService) {
+    bool connectCharacteristics(String service) {
         log("service telit tio 2.0");
         _readCredits = 0;
         _writeCredits = 0;
-        owner._readCharacteristic = gattService.getCharacteristic(BleBluetoothConnection._BLUETOOTH_LE_TIO_CHAR_RX);
-        owner._writeCharacteristic = gattService.getCharacteristic(BleBluetoothConnection._BLUETOOTH_LE_TIO_CHAR_TX);
-        _readCreditsCharacteristic = gattService.getCharacteristic(BleBluetoothConnection._BLUETOOTH_LE_TIO_CHAR_RX_CREDITS);
-        _writeCreditsCharacteristic = gattService.getCharacteristic(BleBluetoothConnection._BLUETOOTH_LE_TIO_CHAR_TX_CREDITS);
-        if (owner._readCharacteristic == null) {
+        owner._readCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_TIO_CHAR_RX;
+        owner._writeCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_TIO_CHAR_TX;
+        _readCreditsCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_TIO_CHAR_RX_CREDITS;
+        _writeCreditsCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_TIO_CHAR_TX_CREDITS;
+        if (owner._services[service]?.contains(owner._readCharacteristic) ?? false) {
             owner._onSerialConnectError(Exception("read characteristic not found"));
             return false;
         }
-        if (owner._writeCharacteristic == null) {
+        if (owner._services[service]?.contains(owner._writeCharacteristic) ?? false) {
             owner._onSerialConnectError(Exception("write characteristic not found"));
             return false;
         }
-        if (_readCreditsCharacteristic == null) {
+        if (owner._services[service]?.contains(_readCreditsCharacteristic) ?? false) {
             owner._onSerialConnectError(Exception("read credits characteristic not found"));
             return false;
         }
-        if (_writeCreditsCharacteristic == null) {
+        if (owner._services[service]?.contains(_writeCreditsCharacteristic) ?? false) {
             owner._onSerialConnectError(Exception("write credits characteristic not found"));
             return false;
         }
-        if (!gatt.setCharacteristicNotification(_readCreditsCharacteristic, true)) {
+        //DUMMY What about the callback?
+        BluetoothCallbackTracker.INSTANCE.setNotifiable(owner.address, service, _readCreditsCharacteristic!, BleInputProperty.indication).onError((error, stackTrace) {
             owner._onSerialConnectError(Exception("no notification for read credits characteristic"));
-            return false;
-        }
-        BluetoothGattDescriptor readCreditsDescriptor = _readCreditsCharacteristic.getDescriptor(BleBluetoothConnection._BLUETOOTH_LE_CCCD);
-        if (readCreditsDescriptor == null) {
-            owner._onSerialConnectError(Exception("no CCCD descriptor for read credits characteristic"));
-            return false;
-        }
-        readCreditsDescriptor.setValue(BluetoothGattDescriptor.ENABLE_INDICATION_VALUE);
-        log("writing read credits characteristic descriptor");
-        if (!gatt.writeDescriptor(readCreditsDescriptor)) {
-            owner._onSerialConnectError(Exception("read credits characteristic CCCD descriptor not writable"));
-            return false;
-        }
-        log("writing read credits characteristic descriptor");
+        });
         return false;
         // continues asynchronously in connectCharacteristics2
     }
 
     @override
-    void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
-        if(descriptor.getCharacteristic() == _readCreditsCharacteristic) {
-            log("writing read credits characteristic descriptor finished, status=$status");
-            if (status != BluetoothGatt.GATT_SUCCESS) {
+    void onDescriptorWrite(String characteristic, bool success) { //DUMMY Do we need to call this on failure?
+        if(characteristic == _readCreditsCharacteristic) {
+            log("writing read credits characteristic descriptor finished, success=$success");
+            if (!success) {
                 owner._onSerialConnectError(Exception("write credits descriptor failed"));
             } else {
-                owner._connectCharacteristics2(gatt);
+                owner._connectCharacteristics2();
             }
         }
-        if(descriptor.getCharacteristic() == owner._readCharacteristic) {
-            log("writing read characteristic descriptor finished, status=$status");
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                owner._readCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
-                owner._writeCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
-                grantReadCredits();
+        if(characteristic == owner._readCharacteristic) {
+            log("writing read characteristic descriptor finished, success=$success");
+            if (success) {
+                //CHECK ???
+                // owner._readCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+                // owner._writeCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+                grantReadCredits(); //DUMMY async
                 // grantReadCredits includes gatt.writeCharacteristic(writeCreditsCharacteristic)
                 // but we do not have to wait for confirmation, as it is the last write of connect phase.
+                //CHECK Does it matter that we'll probably get a response?
             }
         }
     }
 
     @override
-    void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
+    Future<void> onCharacteristicChanged(String characteristic) async {
         if(characteristic == _readCreditsCharacteristic) { // NOPMD - test object identity
-            int newCredits = _readCreditsCharacteristic.getValue()[0];
+            int newCredits = (await BluetoothCallbackTracker.INSTANCE.readValue(owner.address, owner._readService, _readCreditsCharacteristic!))[0];
             // synchronized (writeBuffer) {
                 _writeCredits += newCredits;
             // }
@@ -641,13 +621,13 @@ class _TelitDelegate extends _DeviceDelegate {
             }
         }
         if(characteristic == owner._readCharacteristic) { // NOPMD - test object identity
-            grantReadCredits();
+            await grantReadCredits();
             log("read, credits=$_readCredits");
         }
     }
 
     @override
-    void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+    void onCharacteristicWrite(String characteristic, int status) {
         if(characteristic == owner._writeCharacteristic) { // NOPMD - test object identity
             // synchronized (owner._writeBuffer) {
                 if (_writeCredits > 0)
@@ -674,7 +654,7 @@ class _TelitDelegate extends _DeviceDelegate {
         _writeCreditsCharacteristic = null;
     }
 
-    void grantReadCredits() {
+    Future<void> grantReadCredits() async {
         final int minReadCredits = 16;
         final int maxReadCredits = 64;
         if(_readCredits > 0)
@@ -684,8 +664,9 @@ class _TelitDelegate extends _DeviceDelegate {
             _readCredits += newCredits;
             Uint8List data = Uint8List.fromList([newCredits]);
             log("grant read credits +$newCredits =$_readCredits");
-            _writeCreditsCharacteristic.setValue(data);
-            if (!gatt.writeCharacteristic(_writeCreditsCharacteristic)) {
+            try {
+                await BluetoothCallbackTracker.INSTANCE.writeValue(owner.address, owner._writeService, _writeCreditsCharacteristic!, data);
+            } catch (e, s) {
                 if(owner._connected)
                     owner._onSerialIoError(Exception("write read credits failed"));
                 else
