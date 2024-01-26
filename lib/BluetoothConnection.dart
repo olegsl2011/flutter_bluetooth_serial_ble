@@ -43,7 +43,7 @@ class BluetoothConnection {
   /// Stream sink used to write to the remote Bluetooth device
   ///
   /// You should use some encoding to send string, for example `.add(ascii.encode('Hello!'))` or `.add(utf8.encode('Cześć!))`.
-  late _BluetoothStreamSink<Uint8List> output;
+  late BluetoothStreamSink<Uint8List> output;
 
   /// Describes is stream connected.
   bool get isConnected => output.isConnected;
@@ -62,7 +62,7 @@ class BluetoothConnection {
             );
 
     input = _readStreamController.stream;
-    output = _BluetoothStreamSink<Uint8List>(id);
+    output = BluetoothStreamSink<Uint8List>(id);
   }
 
   /// Returns connection to given address.
@@ -133,12 +133,12 @@ class BluetoothConnection {
   /// Closes connection (rather gracefully), in result should also disconnect.
   Future<void> finish() async {
     await output.allSent;
-    close();
+    await close();
   }
 }
 
 /// Helper class for sending responses.
-class _BluetoothStreamSink<Uint8List> extends StreamSink<Uint8List> {
+class BluetoothStreamSink<Uint8List> extends StreamSink<Uint8List> {
   final int? _id;
 
   /// Describes is stream connected.
@@ -152,7 +152,7 @@ class _BluetoothStreamSink<Uint8List> extends StreamSink<Uint8List> {
   /// Exception to be returend from `done` Future, passed from `add` function or related.
   dynamic exception;
 
-  _BluetoothStreamSink(this._id) {
+  BluetoothStreamSink(this._id) {
     // `_doneFuture` must be initialized here because `close` must return the same future.
     // If it would be in `done` get body, it would result in creating new futures every call.
     _doneFuture = Future(() async {

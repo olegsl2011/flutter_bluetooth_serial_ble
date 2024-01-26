@@ -28,6 +28,8 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
     final Map<String, Stream<Pair<String, Uint8List>>> _deviceValueStreams = {};
     final Map<Pair<String, String>, StreamController<Uint8List>> _charValueSCs = {};
     final Map<Pair<String, String>, Stream<Uint8List>> _charValueStreams = {};
+    final Map<Pair<String, String>, StreamController<Pair<Uint8List, bool>>> _wroteCharSCs = {};
+    final Map<Pair<String, String>, Stream<Pair<Uint8List, bool>>> _wroteCharStreams = {};
 
     // Some platforms demand uppercase, some demand lowercase.  Facepalm.
     String _normalizeDevice(String s) {
@@ -95,6 +97,19 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
         }
     }
 
+    void _ensureWroteChar(String deviceId, String characteristicId) {
+        deviceId = _normalizeDevice(deviceId);
+        characteristicId = _normalizeService(characteristicId);
+        final p = Pair(deviceId, characteristicId);
+        if (!_wroteCharSCs.containsKey(p)) {
+            final sc = StreamController<Pair<Uint8List, bool>>();
+            _wroteCharSCs[p] = sc;
+            final s = sc.stream.asBroadcastStream();
+            s.listen((m) {});
+            _wroteCharStreams[p] = s;
+        }
+    }
+
     Stream<BlueScanResult> subscribeForScanResults() {
         return _scanStream;
     }
@@ -129,6 +144,17 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
         characteristicId = _normalizeService(characteristicId);
         _ensureCharValue(deviceId, characteristicId);
         return _charValueStreams[Pair(deviceId, characteristicId)]!;
+    }
+
+    /**
+     * Subscribe to notifications of success of outgoing writes to characteristics.<br/>
+     * Stream is of characteristic `value` (exactly what that means may depend on platform, not sure) and `success`.<br/>
+     */ //DUMMY Should probably support same chars on different services
+    Stream<Pair<Uint8List, bool>> subscribeForWroteCharacteristic(String deviceId, String characteristicId) {
+        deviceId = _normalizeDevice(deviceId);
+        characteristicId = _normalizeService(characteristicId);
+        _ensureWroteChar(deviceId, characteristicId);
+        return _wroteCharStreams[Pair(deviceId, characteristicId)]!;
     }
 
     Set<Token> _scanTokens = {};
@@ -219,6 +245,7 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
         QuickBlue.setServiceHandler(_handleServiceDiscovery);
         QuickBlue.setConnectionHandler(_handleConnectionChange);
         QuickBlue.setValueHandler(_handleValueChange);
+        QuickBlue.setOnWroteCharateristicHandler(_handleWroteChar);
     }
 
     void _handleScanResult(BlueScanResult result) {
@@ -253,6 +280,14 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
         _charValueSCs[Pair(deviceId, characteristicId)]!.add(value);
         _ensureDeviceValue(deviceId);
         _deviceValueSCs[deviceId]!.add(Pair(characteristicId, value));
+    }
+
+    void _handleWroteChar(String deviceId, String characteristicId, Uint8List value, bool success) {
+        deviceId = _normalizeDevice(deviceId);
+        characteristicId = _normalizeService(characteristicId);
+        // log('_handleWroteChar $deviceId, $characteristicId, ${value}, $success');
+        _ensureWroteChar(deviceId, characteristicId);
+        _wroteCharSCs[Pair(deviceId, characteristicId)]!.add(Pair(value, success));
     }
 }
 

@@ -12,57 +12,104 @@ import 'package:quick_blue/quick_blue.dart';
 
 //DUMMY I don't yet know what to do about the original interleaving of data and errors; streams don't support that
 
-class BleBluetoothConnection implements BluetoothConnection {
-  @override
-  Stream<Uint8List>? input;
-
-  @override
-  var output;
-
+class BleBluetoothConnection implements SerialListener, BluetoothConnection {
   bool _manuallyDisconnected = false;
   final String address;
 
   BleBluetoothConnection(this.address) {
+    _readStreamController = StreamController<Uint8List>();
+    input = _readStreamController.stream;
+    _writeStreamController.delegate.stream.listen((data) async {
+      await write(data);
+    });
+
     BluetoothCallbackTracker.INSTANCE.subscribeForConnectionResults(address).listen((event) {
       _onConnectionStateChange(address, event);
     });
 
     BluetoothCallbackTracker.INSTANCE.connect(address);
-    asdf; //DUMMY Other callbacks?
+    //DUMMY Other callbacks?
     //DUMMY There was a disconnectCallbackReceiver....
+
+    _listener = this;
+
+    //DUMMY Hang on, I think this is maybe expected to be connected on return?
   }
 
-  @override
-  Future<void> cancel() {
-    // TODO: implement cancel
-    throw UnimplementedError();
-  }
+
+  //// BluetoothConnection, mostly copied
+
+  late StreamController<Uint8List> _readStreamController;
 
   @override
-  Future<void> close() {
-    // TODO: implement close
-    throw UnimplementedError();
-  }
+  late final Stream<Uint8List>? input;
+
+  final _writeStreamController = BleBluetoothStreamSink<Uint8List>();
 
   @override
+  late BluetoothStreamSink<Uint8List> output = _writeStreamController;
+
+  @override
+  bool get isConnected => _connected; //DUMMY Resolve conflict with output.connected
+
+  /// Should be called to make sure the connection is closed and resources are freed (sockets/channels).
   void dispose() {
-    // TODO: implement dispose
+    finish();
+  }
+
+  /// Closes connection (rather immediately), in result should also disconnect.
+  @override
+  Future<void> close() async {
+    await disconnect();
+    await Future.wait([
+      output.close(),
+      (!_readStreamController.isClosed)
+          ? _readStreamController.close()
+          : Future.value(/* Empty future */)
+    ], eagerError: true);
+  }
+
+  /// Closes connection (rather immediately), in result should also disconnect.
+  @Deprecated('Use `close` instead')
+  Future<void> cancel() => this.close();
+
+  /// Closes connection (rather gracefully), in result should also disconnect.
+  Future<void> finish() async {
+    await output.allSent;
+    await close();
+  }
+
+
+
+  //// SerialListener
+
+  @override
+  void onSerialConnect() {
+    output.isConnected = true;
+    //DUMMY Do we need to do anything else?
   }
 
   @override
-  Future<void> finish() {
-    // TODO: implement finish
-    throw UnimplementedError();
+  void onSerialConnectError(Exception e) {
+    _readStreamController.addError(e);
+    //DUMMY Do we need to do anything else?
   }
 
   @override
-  // TODO: implement isConnected
-  bool get isConnected => throw UnimplementedError();
+  void onSerialIoError(Exception e) {
+    _readStreamController.addError(e);
+    //DUMMY Do we need to do anything else?
+  }
+
+  @override
+  void onSerialRead(Uint8List data) {
+    _readStreamController.add(data);
+    //DUMMY Do we need to do anything else?
+  }
 
 
 
-
-
+    //// From SerialSocket.java
 
     static final String _BLUETOOTH_LE_CCCD           = "00002902-0000-1000-8000-00805f9b34fb";
     static final String _BLUETOOTH_LE_CC254X_SERVICE = "0000ffe0-0000-1000-8000-00805f9b34fb";
@@ -88,18 +135,17 @@ class BleBluetoothConnection implements BluetoothConnection {
 
     final List<Uint8List> _writeBuffer = <Uint8List>[];
 
-    SerialListener _listener;
+    SerialListener? _listener;
     _DeviceDelegate? _delegate;
     String? _readService, _writeService; //DUMMY Make sure to set these
     String? _readCharacteristic, _writeCharacteristic;
 
-    bool _writePending;
-    bool _canceled;
-    bool _connected;
+    bool _writePending = false;
+    bool _canceled = false;
+    bool _connected = false;
     int _payloadSize = _DEFAULT_MTU-3;
 
-    void disconnect() {
-        asdf;
+    Future<void> disconnect() async {
         log("disconnect");
         _listener = null; // ignore remaining data and errors
         // address = null;
@@ -114,9 +160,9 @@ class BleBluetoothConnection implements BluetoothConnection {
         _readCharacteristic = null;
         _writeCharacteristic = null;
         if (_delegate != null)
-            _delegate.disconnect();
+            _delegate!.disconnect();
         //THINK ...Should it await?
-        unawaited(BluetoothCallbackTracker.INSTANCE.disconnect(address));
+        await BluetoothCallbackTracker.INSTANCE.disconnect(address);
         _connected = false;
         //DUMMY Unregister disconnectBroadcastReceiver, whatever that ends up meaning
     }
@@ -194,7 +240,7 @@ class BleBluetoothConnection implements BluetoothConnection {
                 _delegate = new _TelitDelegate(this);
 
             if(_delegate != null) {
-                sync = _delegate.connectCharacteristics(gattService);
+                sync = _delegate!.connectCharacteristics(gattService);
                 break;
             }
         }
@@ -237,7 +283,6 @@ class BleBluetoothConnection implements BluetoothConnection {
     }
 
     void _connectCharacteristics3() {
-        asdf;
         // // QuickBlue doesn't support getting characteristic properties
         // int writeProperties = _writeCharacteristic.getProperties();
         // if((writeProperties & (BluetoothGattCharacteristic.PROPERTY_WRITE +     // Microbit,HM10-clone have WRITE
@@ -247,6 +292,7 @@ class BleBluetoothConnection implements BluetoothConnection {
         // }
 
         // I've opted for async, here, but it's possible it should have been sync
+        //CHECK Is this really the only char subscription we make?  Really??
         BluetoothCallbackTracker.INSTANCE.subscribeForCharacteristicValues(address, _readCharacteristic!).listen((event) {
             onCharacteristicChanged(_readCharacteristic!, event);
         }).onError((e, s) {
@@ -263,7 +309,7 @@ class BleBluetoothConnection implements BluetoothConnection {
     }
 
     void onDescriptorWrite(String characteristic, bool success) {
-        _delegate.onDescriptorWrite(characteristic, success);
+        _delegate!.onDescriptorWrite(characteristic, success);
         if(_canceled)
             return;
         if(characteristic == _readCharacteristic) {
@@ -286,7 +332,7 @@ class BleBluetoothConnection implements BluetoothConnection {
     void onCharacteristicChanged(String characteristic, Uint8List data) { //DUMMY Check this is called where it should be
         if(_canceled)
             return;
-        _delegate.onCharacteristicChanged(characteristic, data);
+        _delegate!.onCharacteristicChanged(characteristic, data);
         if(_canceled)
             return;
         if(characteristic == _readCharacteristic) { // NOPMD - test object identity
@@ -308,7 +354,7 @@ class BleBluetoothConnection implements BluetoothConnection {
             } else {
                 data0 = data.sublist(0, _payloadSize);
             }
-            if(!_writePending && _writeBuffer.isEmpty && _delegate.canWrite()) {
+            if(!_writePending && _writeBuffer.isEmpty && _delegate!.canWrite()) {
                 _writePending = true;
             } else {
                 _writeBuffer.add(data0);
@@ -327,7 +373,11 @@ class BleBluetoothConnection implements BluetoothConnection {
         if(data0 != null) {
             try {
                 //DUMMY "true, if the write operation was initiated successfully" so, make async again I guess
-                await BluetoothCallbackTracker.INSTANCE.writeValue(address, _writeService!, _writeCharacteristic!, data0);
+                final wc = _writeCharacteristic!;
+                unawaited(BluetoothCallbackTracker.INSTANCE.subscribeForWroteCharacteristic(address, wc).first.then((value) async {
+                  await onCharacteristicWrite(wc, value.b);
+                }));
+                await BluetoothCallbackTracker.INSTANCE.writeValue(address, _writeService!, wc, data0);
                 log("write started, len=${data0.length}");
             } catch (e, s) {
                 _onSerialIoError(Exception("write failed"));
@@ -337,15 +387,15 @@ class BleBluetoothConnection implements BluetoothConnection {
         //DUMMY It probably doesn't
     }
 
-    //DUMMY Make sure this gets called in the places it needs to
-    void onCharacteristicWrite(String characteristic, bool success) {
+    // Note - this is for when we WRITE to ble
+    Future<void> onCharacteristicWrite(String characteristic, bool success) async {
         if(_canceled || !_connected || _writeCharacteristic == null)
             return;
         if(!success) {
             _onSerialIoError(Exception("write failed"));
             return;
         }
-        _delegate.onCharacteristicWrite(characteristic, success);
+        _delegate!.onCharacteristicWrite(characteristic, success);
         if(_canceled)
             return;
         if(characteristic == _writeCharacteristic) { // NOPMD - test object identity
@@ -357,7 +407,7 @@ class BleBluetoothConnection implements BluetoothConnection {
     Future<void> _writeNext() async { //DUMMY propagate async
         final Uint8List data;
         // synchronized (writeBuffer) {
-            if (!_writeBuffer.isEmpty && _delegate.canWrite()) {
+            if (!_writeBuffer.isEmpty && _delegate!.canWrite()) {
                 _writePending = true;
                 data = _writeBuffer.removeAt(0);
             } else {
@@ -366,7 +416,11 @@ class BleBluetoothConnection implements BluetoothConnection {
             }
         // }
         try {
-            await BluetoothCallbackTracker.INSTANCE.writeValue(address, _writeService!, _writeCharacteristic!, data);
+            final wc = _writeCharacteristic!;
+            unawaited(BluetoothCallbackTracker.INSTANCE.subscribeForWroteCharacteristic(address, wc).first.then((value) async {
+              await onCharacteristicWrite(wc, value.b);
+            }));
+            await BluetoothCallbackTracker.INSTANCE.writeValue(address, _writeService!, wc, data);
             log("write started, len=${data.length}");
         } catch (e, s) {
             _onSerialIoError(Exception("write failed"));
@@ -374,29 +428,29 @@ class BleBluetoothConnection implements BluetoothConnection {
     }
 
     /**
-     * SerialListener
+     * Call out to SerialListener
      */
     void _onSerialConnect() {
         if (_listener != null)
-            _listener.onSerialConnect();
+            _listener!.onSerialConnect();
     }
 
     void _onSerialConnectError(Exception e) {
         _canceled = true;
         if (_listener != null)
-            _listener.onSerialConnectError(e);
+            _listener!.onSerialConnectError(e);
     }
 
     void _onSerialRead(Uint8List data) {
         if (_listener != null)
-            _listener.onSerialRead(data);
+            _listener!.onSerialRead(data);
     }
 
     void _onSerialIoError(Exception e) {
         _writePending = false;
         _canceled = true;
         if (_listener != null)
-            _listener.onSerialIoError(e);
+            _listener!.onSerialIoError(e);
     }
 }
 
@@ -602,7 +656,11 @@ class _TelitDelegate extends _DeviceDelegate {
             Uint8List data = Uint8List.fromList([newCredits]);
             log("grant read credits +$newCredits =$_readCredits");
             try {
-                await BluetoothCallbackTracker.INSTANCE.writeValue(owner.address, owner._writeService!, _writeCreditsCharacteristic!, data);
+                final wc = _writeCreditsCharacteristic!;
+                unawaited(BluetoothCallbackTracker.INSTANCE.subscribeForWroteCharacteristic(owner.address, wc).first.then((value) async {
+                  await owner.onCharacteristicWrite(wc, value.b);
+                }));
+                await BluetoothCallbackTracker.INSTANCE.writeValue(owner.address, owner._writeService!, wc, data);
             } catch (e, s) {
                 if(owner._connected)
                     owner._onSerialIoError(Exception("write read credits failed"));
@@ -611,4 +669,112 @@ class _TelitDelegate extends _DeviceDelegate {
             }
         }
     }
+}
+
+abstract class SerialListener {
+    void onSerialConnect      ();
+    void onSerialConnectError (Exception e);
+    void onSerialRead         (Uint8List data); // data coming in from BLE
+    void onSerialIoError      (Exception e);
+}
+
+// Almost entirely copied from BluetoothStreamSink
+class BleBluetoothStreamSink<Uint8List> extends StreamSink<Uint8List> implements BluetoothStreamSink<Uint8List> {
+  /// Describes is stream connected.
+  bool isConnected = true;
+
+  /// Chain of features, the variable represents last of the futures.
+  Future<void> _chainedFutures = Future.value(/* Empty future :F */);
+
+  late Future<dynamic> _doneFuture;
+
+  /// Exception to be returend from `done` Future, passed from `add` function or related.
+  dynamic exception;
+
+  var delegate = StreamController<Uint8List>();
+
+  /// Adds raw bytes to the output sink.
+  ///
+  /// The data is sent almost immediately, but if you want to be sure,
+  /// there is `this.allSent` that provides future which completes when
+  /// all added data are sent.
+  ///
+  /// You should use some encoding to send string, for example `ascii.encode('Hello!')` or `utf8.encode('Cześć!)`.
+  ///
+  /// Might throw `StateError("Not connected!")` if not connected.
+  @override
+  void add(Uint8List data) {
+    if (!isConnected) {
+      throw StateError("Not connected!");
+    }
+
+    _chainedFutures = _chainedFutures.then((_) async {
+      if (!isConnected) {
+        throw StateError("Not connected!");
+      }
+
+      delegate.add(data);
+    }).catchError((e) {
+      this.exception = e;
+      close();
+    });
+  }
+
+  /// Unsupported - this ouput sink cannot pass errors to platfom code.
+  @override
+  void addError(Object error, [StackTrace? stackTrace]) {
+    throw UnsupportedError(
+        "BluetoothConnection output (response) sink cannot receive errors!");
+  }
+
+  @override
+  Future addStream(Stream<Uint8List> stream) => Future(() async {
+    // @TODO ??? `addStream`, "alternating simultaneous addition" problem (read below)
+    // If `onDone` were called some time after last `add` to the stream (what is okay),
+    // this `addStream` function might wait not for the last "own" addition to this sink,
+    // but might wait for last addition at the moment of the `onDone`.
+    // This can happen if user of the library would use another `add` related function
+    // while `addStream` still in-going. We could do something about it, but this seems
+    // not to be so necessary since `StreamSink` specifies that `addStream` should be
+    // blocking for other forms of `add`ition on the sink.
+    var completer = Completer();
+    stream.listen(this.add).onDone(completer.complete);
+    await completer.future;
+    await _chainedFutures; // Wait last* `add` of the stream to be fulfilled
+  });
+
+  @override
+  Future close() {
+    isConnected = false;
+    return this.done;
+  }
+
+  @override
+  Future get done => _doneFuture;
+
+  /// Returns a future which is completed when the sink sent all added data,
+  /// instead of only if the sink got closed.
+  ///
+  /// Might fail with an error in case if some occured while sending the data.
+  /// Typical error could be `StateError("Not connected!")` which could happen
+  /// if disconnected in middle of sending (queued) `add`ed data.
+  ///
+  /// Otherwise, the returned future will complete when either:
+  Future get allSent => Future(() async {
+    // Simple `await` can't get job done here, because the `_chainedFutures` member
+    // in one access time provides last Future, then `await`ing for it allows the library
+    // user to add more futures on top of the waited-out Future.
+    Future lastFuture;
+    do {
+      lastFuture = this._chainedFutures;
+      await lastFuture;
+    } while (lastFuture != this._chainedFutures);
+
+    if (this.exception != null) {
+      throw this.exception;
+    }
+
+    this._chainedFutures =
+        Future.value(); // Just in case if Dart VM is retarded
+  });
 }
