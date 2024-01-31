@@ -50,18 +50,20 @@ class _MainPage extends State<MainPage> {
       return true;
     }).then((_) {
       // Update the address field
-      FlutterBluetoothSerial.instance.address.then((address) {
-        setState(() {
-          _address = address!;
-        });
-      });
+      // FlutterBluetoothSerial.instance.address.then((address) {
+      //   setState(() {
+      //     _address = address!;
+      //   });
+      // });
+      _address = "UNKNOWN";
     });
 
-    FlutterBluetoothSerial.instance.name.then((name) {
-      setState(() {
-        _name = name!;
-      });
-    });
+    // FlutterBluetoothSerial.instance.name.then((name) {
+    //   setState(() {
+    //     _name = name!;
+    //   });
+    // });
+    _name = "UNKNOWN";
 
     // Listen for futher state changes
     FlutterBluetoothSerial.instance
@@ -230,6 +232,7 @@ class _MainPage extends State<MainPage> {
 
                     if (selectedDevice != null) {
                       print('Discovery -> selected ' + selectedDevice.address);
+                      _startChat(context, selectedDevice);
                     } else {
                       print('Discovery -> no device selected');
                     }

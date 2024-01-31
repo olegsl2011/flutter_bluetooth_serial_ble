@@ -174,6 +174,9 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
             await QuickBlue.stopScan();
         }
     }
+    bool isScanning() {
+        return _scanTokens.isNotEmpty;
+    }
 
     Future<bool> isBluetoothAvailable() async {
         await _initialized.wait();
