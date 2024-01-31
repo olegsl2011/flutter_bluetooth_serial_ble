@@ -23,6 +23,7 @@ dependencies:
       url: https://github.com/erhannis/quick.flutter.git
       ref: feature/on_write_characteristic
       path: packages/quick_blue
+  quiver: ^3.1.0
 
 flutter:
   plugin:

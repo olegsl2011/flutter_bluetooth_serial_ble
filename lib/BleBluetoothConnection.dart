@@ -16,15 +16,26 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
   bool _manuallyDisconnected = false;
   final String address;
 
+  final _connectedStreamController = StreamController<bool>();
+  late final connectedStream = _connectedStreamController.stream.asBroadcastStream();
+
   BleBluetoothConnection(this.address) {
+    log("-->BBC init");
     _readStreamController = StreamController<Uint8List>();
     input = _readStreamController.stream;
     _writeStreamController.delegate.stream.listen((data) async {
+      log("-->BBC.writeSC");
       await write(data);
+      log("<--BBC.writeSC");
     });
 
+    // Start the connected stream broadcasting
+    connectedStream.listen((c) {});
+
     BluetoothCallbackTracker.INSTANCE.subscribeForConnectionResults(address).listen((event) {
+      log("-->BCT.connectionResult $event");
       _onConnectionStateChange(address, event);
+      log("<--BCT.connectionResult");
     });
 
     BluetoothCallbackTracker.INSTANCE.connect(address);
@@ -34,6 +45,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
     _listener = this;
 
     //DUMMY Hang on, I think this is maybe expected to be connected on return?
+    log("<--BBC init");
   }
 
 
@@ -54,19 +66,23 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
 
   /// Should be called to make sure the connection is closed and resources are freed (sockets/channels).
   void dispose() {
+    log("-->BBC.dispose");
     finish();
+    log("<--BBC.dispose");
   }
 
   /// Closes connection (rather immediately), in result should also disconnect.
   @override
   Future<void> close() async {
+    log("-->BBC.close");
     await disconnect();
     await Future.wait([
-      output.close(),
+      output.close(), //DUMMY When this threw, the app subsequently couldn't discover devices; find out why
       (!_readStreamController.isClosed)
           ? _readStreamController.close()
           : Future.value(/* Empty future */)
     ], eagerError: true);
+    log("<--BBC.close");
   }
 
   /// Closes connection (rather immediately), in result should also disconnect.
@@ -75,8 +91,10 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
 
   /// Closes connection (rather gracefully), in result should also disconnect.
   Future<void> finish() async {
+    log("-->BBC.finish");
     await output.allSent;
     await close();
+    log("<--BBC.close");
   }
 
 
@@ -85,26 +103,34 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
 
   @override
   void onSerialConnect() {
+    log("-->BBC.onSerialConnect");
     output.isConnected = true;
-    //DUMMY Do we need to do anything else?
+    //DUMMY Do we need to do anything else?  Like, emit a connection event?
+    log("<--BBC.onSerialConnect");
   }
 
   @override
   void onSerialConnectError(Exception e) {
+    log("-->BBC.onSerialConnectError");
     _readStreamController.addError(e);
     //DUMMY Do we need to do anything else?
+    log("<--BBC.onSerialConnectError");
   }
 
   @override
   void onSerialIoError(Exception e) {
+    log("-->BBC.onSerialIoError");
     _readStreamController.addError(e);
     //DUMMY Do we need to do anything else?
+    log("<--BBC.onSerialIoError");
   }
 
   @override
   void onSerialRead(Uint8List data) {
+    log("-->BBC.onSerialRead");
     _readStreamController.add(data);
     //DUMMY Do we need to do anything else?
+    log("<--BBC.onSerialRead");
   }
 
 
@@ -146,7 +172,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
     int _payloadSize = _DEFAULT_MTU-3;
 
     Future<void> disconnect() async {
-        log("disconnect");
+        log("-->BBC.disconnect");
         _listener = null; // ignore remaining data and errors
         // address = null;
         _canceled = true;
@@ -158,19 +184,23 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
             _writeBuffer.clear();
         }
         _readCharacteristic = null;
+        _readService = null;
         _writeCharacteristic = null;
+        _writeService = null;
         if (_delegate != null)
             _delegate!.disconnect();
         //THINK ...Should it await?
         await BluetoothCallbackTracker.INSTANCE.disconnect(address);
         _connected = false;
-        //DUMMY Unregister disconnectBroadcastReceiver, whatever that ends up meaning
+        _connectedStreamController.add(_connected);
+        log("<--BBC.disconnect");
     }
 
     /**
      * connect-success and most connect-errors are returned asynchronously to listener
      */
     Future<void> connect(SerialListener listener) async {
+        log("-->BBC.connect");
         if(_connected || _manuallyDisconnected) // I don't know what the result would be of permitting you to reconnect; it seems like the original code was written not to allow that.
             throw Exception("already connected");
         _canceled = false;
@@ -179,6 +209,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
         log("connect $address");
         await BluetoothCallbackTracker.INSTANCE.connect(address);
         // continues asynchronously in onPairingBroadcastReceive() and onConnectionStateChange()
+        log("<--BBC.connect");
     }
 
     //SHAME Turns out you're allowed to have multiple characteristics with the same UUID (bleh), and this does not accommodate that.
@@ -187,6 +218,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
     final _servicesTimeout = CountdownTimer(); //THINK Not sure if class field, or local var
 
     Future<void> _onConnectionStateChange(String deviceId, BlueConnectionState state) async {
+        log("-->BBC._onConnectionStateChange");
         print('_handleConnectionChange $deviceId, $state');
         // status directly taken from gat_api.h, e.g. 133=0x85=GATT_ERROR ~= timeout
         if (state == BlueConnectionState.connected) {
@@ -194,6 +226,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
             try {
               //DUMMY We should probably cancel this in `disconnect` and so forth
               BluetoothCallbackTracker.INSTANCE.subscribeForServiceResults(deviceId).listen((event) {
+                log("-->BBC._onConnectionStateChange.service discovered $event");
                 var cs = _services[event.a];
                 if (cs == null) {
                   cs = Set();
@@ -201,8 +234,11 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
                 }
                 cs.addAll(event.b);
                 _servicesTimeout.delay(Duration(milliseconds: 500)).then((value) {
+                  log("-->BBC._onConnectionStateChange.@serviceDiscovered.@timeout");
                   _onServicesDiscovered();
+                  log("<--BBC._onConnectionStateChange.@serviceDiscovered.@timeout");
                 }, onError: (e) {});
+                log("<--BBC._onConnectionStateChange.service discovered");
               });
               await BluetoothCallbackTracker.INSTANCE.discoverServices(deviceId);
             } catch (e, s) {
@@ -217,26 +253,32 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
             log("unknown connect state $state");
         }
         // continues asynchronously in onServicesDiscovered()
+        log("<--BBC._onConnectionStateChange");
     }
 
     void _onServicesDiscovered() {
+        log("-->BBC._onServicesDiscovered");
         log("servicesDiscovered, $_services");
-        if (_canceled)
+        if (_canceled) {
+            log("<--BBC._onServicesDiscovered");
             return;
+        }
         _connectCharacteristics1();
+        log("<--BBC._onServicesDiscovered");
     }
 
     void _connectCharacteristics1() {
+        log("-->BBC._connectCharacteristics1");
         bool sync = true;
         _writePending = false;
         for (String gattService in _services.keys) {
-            if (gattService == _BLUETOOTH_LE_CC254X_SERVICE)
+            if (uuidsEqual(gattService, _BLUETOOTH_LE_CC254X_SERVICE))
                 _delegate = new _Cc245XDelegate(this);
-            if (gattService == _BLUETOOTH_LE_MICROCHIP_SERVICE)
+            if (uuidsEqual(gattService, _BLUETOOTH_LE_MICROCHIP_SERVICE))
                 _delegate = new _MicrochipDelegate(this);
-            if (gattService == _BLUETOOTH_LE_NRF_SERVICE)
+            if (uuidsEqual(gattService, _BLUETOOTH_LE_NRF_SERVICE))
                 _delegate = new _NrfDelegate(this);
-            if (gattService == _BLUETOOTH_LE_TIO_SERVICE)
+            if (uuidsEqual(gattService, _BLUETOOTH_LE_TIO_SERVICE))
                 _delegate = new _TelitDelegate(this);
 
             if(_delegate != null) {
@@ -244,8 +286,10 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
                 break;
             }
         }
-        if(_canceled)
+        if(_canceled) {
+            log("<--BBC._connectCharacteristics1");
             return;
+        }
         if(_delegate==null || _readCharacteristic==null || _writeCharacteristic==null) {
             for (String gattService in _services.keys) {
                 log("service $gattService");
@@ -253,13 +297,16 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
                     log("characteristic $characteristic");
             }
             _onSerialConnectError(Exception("no serial profile found"));
+            log("<--BBC._connectCharacteristics1");
             return;
         }
         if(sync)
             _connectCharacteristics2();
+        log("<--BBC._connectCharacteristics1");
     }
 
     void _connectCharacteristics2() {
+        log("-->BBC._connectCharacteristics2");
         if (false) {
             //DUMMY Try to set max MTU.  But I don't trust QuickBlue's one-channel notification stream under the hood.
             // log("request max MTU");
@@ -270,9 +317,11 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
         } else {
             _connectCharacteristics3();
         }
+        log("<--BBC._connectCharacteristics2");
     }
 
     void onMtuChanged(int mtu, bool success) {
+        log("-->BBC.onMtuChanged $mtu $success");
         //DUMMY Integrate
         log("mtu size $mtu");
         if(success) {
@@ -280,9 +329,11 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
             log("payload size $_payloadSize");
         }
         _connectCharacteristics3();
+        log("<--BBC.onMtuChanged");
     }
 
     void _connectCharacteristics3() {
+        log("-->BBC._connectCharacteristics3");
         // // QuickBlue doesn't support getting characteristic properties
         // int writeProperties = _writeCharacteristic.getProperties();
         // if((writeProperties & (BluetoothGattCharacteristic.PROPERTY_WRITE +     // Microbit,HM10-clone have WRITE
@@ -303,16 +354,21 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
         BluetoothCallbackTracker.INSTANCE.setNotifiable(address, _readService!, _readCharacteristic!, BleInputProperty.notification).then((value) async {
             onDescriptorWrite(_readCharacteristic!, true);
         }, onError: (e, s) async {
+            log("set notifiable readCharacteristic error $e $s");
             onDescriptorWrite(_readCharacteristic!, false);
             _onSerialConnectError(Exception("no notification for read characteristic")); // This may be redundant
         });
+        log("<--BBC._connectCharacteristics3");
     }
 
     void onDescriptorWrite(String characteristic, bool success) {
+        log("-->BBC.onDescriptorWrite $characteristic $success");
         _delegate!.onDescriptorWrite(characteristic, success);
-        if(_canceled)
+        if(_canceled) {
+            log("<--BBC.onDescriptorWrite");
             return;
-        if(characteristic == _readCharacteristic) {
+        }
+        if(uuidsEqual(characteristic, _readCharacteristic)) {
             log("writing read characteristic descriptor finished, success=$success");
             if (!success) {
                 _onSerialConnectError(Exception("write descriptor failed"));
@@ -321,30 +377,39 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
                 // before confirmed by this method, so receive data can be shown before device is shown as 'Connected'.
                 _onSerialConnect();
                 _connected = true;
+                _connectedStreamController.add(_connected);
                 log("connected");
             }
         }
+        log("<--BBC.onDescriptorWrite");
     }
 
     /*
      * read
      */
     void onCharacteristicChanged(String characteristic, Uint8List data) { //DUMMY Check this is called where it should be
-        if(_canceled)
+        log("-->BBC.onCharacteristicChanged");
+        if(_canceled) {
+            log("<--BBC.onCharacteristicChanged");
             return;
+        }
         _delegate!.onCharacteristicChanged(characteristic, data);
-        if(_canceled)
+        if(_canceled) {
+            log("<--BBC.onCharacteristicChanged");
             return;
-        if(characteristic == _readCharacteristic) { // NOPMD - test object identity
+        }
+        if(uuidsEqual(characteristic, _readCharacteristic)) { // NOPMD - test object identity
             _onSerialRead(data);
             log("read, len=${data.length}");
         }
+        log("<--BBC.onCharacteristicChanged");
     }
 
     /*
      * write
      */
     Future<void> write(Uint8List data) async { //DUMMY Check asyncs
+        log("-->BBC.write");
         if(_canceled || !_connected || _writeCharacteristic == null)
             throw Exception("not connected");
         Uint8List? data0;
@@ -365,7 +430,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
                 for(int i=1; i<(data.length+_payloadSize-1)/_payloadSize; i++) {
                     int from = i*_payloadSize;
                     int to = math.min(from+_payloadSize, data.length);
-                    _writeBuffer.add(data.sublist(from, to));
+                    _writeBuffer.add(data.sublist(from, to)); //DUMMY Got a range error here: "Invalid value: Not in inclusive range 0..213: 220"
                     log("write queued, len=${to-from}");
                 }
             }
@@ -373,6 +438,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
         if(data0 != null) {
             try {
                 //DUMMY "true, if the write operation was initiated successfully" so, make async again I guess
+                //CHECK Can this overlap with _writeNext?  It probably shouldn't.
                 final wc = _writeCharacteristic!;
                 unawaited(BluetoothCallbackTracker.INSTANCE.subscribeForWroteCharacteristic(address, wc).first.then((value) async {
                   await onCharacteristicWrite(wc, value.b);
@@ -384,27 +450,35 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
             }
         }
         // continues asynchronously in onCharacteristicWrite()
-        //DUMMY It probably doesn't
+        log("<--BBC.write");
     }
 
     // Note - this is for when we WRITE to ble
     Future<void> onCharacteristicWrite(String characteristic, bool success) async {
-        if(_canceled || !_connected || _writeCharacteristic == null)
+        log("-->BBC.onCharacteristicWrite $characteristic $success");
+        if(_canceled || !_connected || _writeCharacteristic == null) {
+            log("<--BBC.onCharacteristicWrite");
             return;
+        }
         if(!success) {
             _onSerialIoError(Exception("write failed"));
+            log("<--BBC.onCharacteristicWrite");
             return;
         }
         _delegate!.onCharacteristicWrite(characteristic, success);
-        if(_canceled)
+        if(_canceled) {
+            log("<--BBC.onCharacteristicWrite");
             return;
-        if(characteristic == _writeCharacteristic) { // NOPMD - test object identity
+        }
+        if(uuidsEqual(characteristic, _writeCharacteristic)) { // NOPMD - test object identity
             log("write finished, success=$success");
             await _writeNext();
         }
+        log("<--BBC.onCharacteristicWrite");
     }
 
     Future<void> _writeNext() async { //DUMMY propagate async
+        log("-->BBC._writeNext");
         final Uint8List data;
         // synchronized (writeBuffer) {
             if (!_writeBuffer.isEmpty && _delegate!.canWrite()) {
@@ -412,6 +486,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
                 data = _writeBuffer.removeAt(0);
             } else {
                 _writePending = false;
+                log("<--BBC._writeNext");
                 return;
             }
         // }
@@ -425,32 +500,41 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
         } catch (e, s) {
             _onSerialIoError(Exception("write failed"));
         }
+        log("<--BBC._writeNext");
     }
 
     /**
      * Call out to SerialListener
      */
     void _onSerialConnect() {
+        log("-->BBC._onSerialConnect");
         if (_listener != null)
             _listener!.onSerialConnect();
+        log("<--BBC._onSerialConnect");
     }
 
     void _onSerialConnectError(Exception e) {
+        log("-->BBC._onSerialConnectError");
         _canceled = true;
         if (_listener != null)
             _listener!.onSerialConnectError(e);
+        log("<--BBC._onSerialConnectError");
     }
 
     void _onSerialRead(Uint8List data) {
+        log("-->BBC._onSerialRead");
         if (_listener != null)
             _listener!.onSerialRead(data);
+        log("<--BBC._onSerialRead");
     }
 
     void _onSerialIoError(Exception e) {
+        log("-->BBC._onSerialIoError");
         _writePending = false;
         _canceled = true;
         if (_listener != null)
             _listener!.onSerialIoError(e);
+        log("<--BBC._onSerialIoError");
     }
 }
 
@@ -481,9 +565,13 @@ class _Cc245XDelegate extends _DeviceDelegate {
 
     @override
     bool connectCharacteristics(String service) {
+        log("-->_Cc245XDelegate.connectCharacteristics");
         log("service cc254x uart");
         owner._readCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_CC254X_CHAR_RW;
+        owner._readService = service;
         owner._writeCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_CC254X_CHAR_RW;
+        owner._writeService = service;
+        log("<--_Cc245XDelegate.connectCharacteristics");
         return true;
     }
 }
@@ -493,11 +581,17 @@ class _MicrochipDelegate extends _DeviceDelegate {
 
     @override
     bool connectCharacteristics(String service) {
+        log("-->_MicrochipDelegate.connectCharacteristics");
         log("service microchip uart");
         owner._readCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_MICROCHIP_CHAR_RW;
+        owner._readService = service;
         owner._writeCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_MICROCHIP_CHAR_W;
-        if(owner._services[service]?.contains(owner._writeCharacteristic) ?? false)
+        owner._writeService = service;
+        if(owner._services[service]?.contains(owner._writeCharacteristic) ?? false) {
             owner._writeCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_MICROCHIP_CHAR_RW;
+            owner._writeService = service;
+        }
+        log("<--_MicrochipDelegate.connectCharacteristics");
         return true;
     }
 }
@@ -507,6 +601,7 @@ class _NrfDelegate extends _DeviceDelegate {
 
     @override
     bool connectCharacteristics(String service) {
+        log("-->_NrfDelegate.connectCharacteristics");
         log("service nrf uart");
         String rw2 = BleBluetoothConnection._BLUETOOTH_LE_NRF_CHAR_RW2;
         String rw3 = BleBluetoothConnection._BLUETOOTH_LE_NRF_CHAR_RW3;
@@ -521,14 +616,19 @@ class _NrfDelegate extends _DeviceDelegate {
         //     } else if (rw2write) {
                 //DUMMY We don't really have a way of checking whether a characteristic is writable, atm, aside from writing to it.  So this will probably fail in some cases.
                 owner._writeCharacteristic = rw2;
+                owner._writeService = service;
                 owner._readCharacteristic = rw3;
+                owner._readService = service;
         //     } else if (rw3write) {
         //         owner._writeCharacteristic = rw3;
+        //         owner._writeService = service;
         //         owner._readCharacteristic = rw2;
+        //         owner._readService = service;
         //     } else {
         //         owner._onSerialConnectError(Exception("no write characteristic ($rw2prop/$rw3prop)"));
         //     }
         // }
+        log("<--_NrfDelegate.connectCharacteristics");
         return true;
     }
 }
@@ -542,40 +642,49 @@ class _TelitDelegate extends _DeviceDelegate {
 
     @override
     bool connectCharacteristics(String service) {
+        log("-->_TelitDelegate.connectCharacteristics");
         log("service telit tio 2.0");
         _readCredits = 0;
         _writeCredits = 0;
         owner._readCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_TIO_CHAR_RX;
+        owner._readService = service;
         owner._writeCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_TIO_CHAR_TX;
+        owner._writeService = service;
         _readCreditsCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_TIO_CHAR_RX_CREDITS;
         _writeCreditsCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_TIO_CHAR_TX_CREDITS;
         if (owner._services[service]?.contains(owner._readCharacteristic) ?? false) {
             owner._onSerialConnectError(Exception("read characteristic not found"));
+            log("<--_TelitDelegate.connectCharacteristics");
             return false;
         }
         if (owner._services[service]?.contains(owner._writeCharacteristic) ?? false) {
             owner._onSerialConnectError(Exception("write characteristic not found"));
+            log("<--_TelitDelegate.connectCharacteristics");
             return false;
         }
         if (owner._services[service]?.contains(_readCreditsCharacteristic) ?? false) {
             owner._onSerialConnectError(Exception("read credits characteristic not found"));
+            log("<--_TelitDelegate.connectCharacteristics");
             return false;
         }
         if (owner._services[service]?.contains(_writeCreditsCharacteristic) ?? false) {
             owner._onSerialConnectError(Exception("write credits characteristic not found"));
+            log("<--_TelitDelegate.connectCharacteristics");
             return false;
         }
         //DUMMY What about the callback?
         BluetoothCallbackTracker.INSTANCE.setNotifiable(owner.address, service, _readCreditsCharacteristic!, BleInputProperty.indication).onError((error, stackTrace) {
             owner._onSerialConnectError(Exception("no notification for read credits characteristic"));
         });
-        return false;
+        log("<--_TelitDelegate.connectCharacteristics");
+        return false; //CHECK ...Wait, it ALWAYS returns false?  Same in original
         // continues asynchronously in connectCharacteristics2
     }
 
     @override
     void onDescriptorWrite(String characteristic, bool success) { //DUMMY Do we need to call this on failure?
-        if(characteristic == _readCreditsCharacteristic) {
+        log("-->_TelitDelegate.onDescriptorWrite $characteristic $success");
+        if(uuidsEqual(characteristic, _readCreditsCharacteristic)) {
             log("writing read credits characteristic descriptor finished, success=$success");
             if (!success) {
                 owner._onSerialConnectError(Exception("write credits descriptor failed"));
@@ -583,7 +692,7 @@ class _TelitDelegate extends _DeviceDelegate {
                 owner._connectCharacteristics2();
             }
         }
-        if(characteristic == owner._readCharacteristic) {
+        if(uuidsEqual(characteristic, owner._readCharacteristic)) {
             log("writing read characteristic descriptor finished, success=$success");
             if (success) {
                 //CHECK ???
@@ -595,11 +704,13 @@ class _TelitDelegate extends _DeviceDelegate {
                 //CHECK Does it matter that we'll probably get a response?
             }
         }
+        log("<--_TelitDelegate.onDescriptorWrite");
     }
 
     @override
     Future<void> onCharacteristicChanged(String characteristic, Uint8List data) async {
-        if(characteristic == _readCreditsCharacteristic) { // NOPMD - test object identity
+        log("-->_TelitDelegate.onCharacteristicChanged $characteristic");
+        if(uuidsEqual(characteristic, _readCreditsCharacteristic)) { // NOPMD - test object identity
             int newCredits = data[0];
             // synchronized (writeBuffer) {
                 _writeCredits += newCredits;
@@ -611,41 +722,51 @@ class _TelitDelegate extends _DeviceDelegate {
                 await owner._writeNext();
             }
         }
-        if(characteristic == owner._readCharacteristic) { // NOPMD - test object identity
+        if(uuidsEqual(characteristic, owner._readCharacteristic)) { // NOPMD - test object identity
             await grantReadCredits();
             log("read, credits=$_readCredits");
         }
+        log("<--_TelitDelegate.onCharacteristicChanged");
     }
 
     @override
     void onCharacteristicWrite(String characteristic, bool success) {
-        if(characteristic == owner._writeCharacteristic) { // NOPMD - test object identity
+        log("-->_TelitDelegate.onCharacteristicWrite $characteristic $success");
+        if(uuidsEqual(characteristic, owner._writeCharacteristic)) { // NOPMD - test object identity
             // synchronized (owner._writeBuffer) {
                 if (_writeCredits > 0)
                     _writeCredits -= 1;
             // }
             log("write finished, credits=$_writeCredits");
         }
-        if(characteristic == _writeCreditsCharacteristic) { // NOPMD - test object identity
+        if(uuidsEqual(characteristic, _writeCreditsCharacteristic)) { // NOPMD - test object identity
             log("write credits finished, success=$success");
         }
+        log("<--_TelitDelegate.onCharacteristicWrite");
     }
 
     @override
     bool canWrite() {
-        if(_writeCredits > 0)
+        log("-->_TelitDelegate.canWrite");
+        if(_writeCredits > 0) {
+            log("<--_TelitDelegate.canWrite");
             return true;
+        }
         log("no write credits");
+        log("<--_TelitDelegate.canWrite");
         return false;
     }
 
     @override
     void disconnect() {
+        log("-->_TelitDelegate.disconnect");
         _readCreditsCharacteristic = null;
         _writeCreditsCharacteristic = null;
+        log("<--_TelitDelegate.disconnect");
     }
 
     Future<void> grantReadCredits() async {
+        log("-->_TelitDelegate.grantReadCredits");
         final int minReadCredits = 16;
         final int maxReadCredits = 64;
         if(_readCredits > 0)
@@ -668,6 +789,7 @@ class _TelitDelegate extends _DeviceDelegate {
                     owner._onSerialConnectError(Exception("write read credits failed"));
             }
         }
+        log("<--_TelitDelegate.grantReadCredits");
     }
 }
 
@@ -686,7 +808,7 @@ class BleBluetoothStreamSink<Uint8List> extends StreamSink<Uint8List> implements
   /// Chain of features, the variable represents last of the futures.
   Future<void> _chainedFutures = Future.value(/* Empty future :F */);
 
-  late Future<dynamic> _doneFuture;
+  late Future<dynamic> _doneFuture; //DUMMY Not initialized
 
   /// Exception to be returend from `done` Future, passed from `add` function or related.
   dynamic exception;
@@ -704,6 +826,7 @@ class BleBluetoothStreamSink<Uint8List> extends StreamSink<Uint8List> implements
   /// Might throw `StateError("Not connected!")` if not connected.
   @override
   void add(Uint8List data) {
+    log("-->BBSS.add");
     if (!isConnected) {
       throw StateError("Not connected!");
     }
@@ -718,17 +841,19 @@ class BleBluetoothStreamSink<Uint8List> extends StreamSink<Uint8List> implements
       this.exception = e;
       close();
     });
+    log("<--BBSS.add");
   }
 
   /// Unsupported - this ouput sink cannot pass errors to platfom code.
   @override
   void addError(Object error, [StackTrace? stackTrace]) {
-    throw UnsupportedError(
-        "BluetoothConnection output (response) sink cannot receive errors!");
+    log("-->BBSS.addError $error");
+    throw UnsupportedError("BluetoothConnection output (response) sink cannot receive errors!");
   }
 
   @override
   Future addStream(Stream<Uint8List> stream) => Future(() async {
+    log("-->BBSS.addStream");
     // @TODO ??? `addStream`, "alternating simultaneous addition" problem (read below)
     // If `onDone` were called some time after last `add` to the stream (what is okay),
     // this `addStream` function might wait not for the last "own" addition to this sink,
@@ -741,11 +866,14 @@ class BleBluetoothStreamSink<Uint8List> extends StreamSink<Uint8List> implements
     stream.listen(this.add).onDone(completer.complete);
     await completer.future;
     await _chainedFutures; // Wait last* `add` of the stream to be fulfilled
+    log("<--BBSS.addStream");
   });
 
   @override
   Future close() {
+    log("-->BBSS.close");
     isConnected = false;
+    log("<--BBSS.close");
     return this.done;
   }
 
@@ -761,6 +889,7 @@ class BleBluetoothStreamSink<Uint8List> extends StreamSink<Uint8List> implements
   ///
   /// Otherwise, the returned future will complete when either:
   Future get allSent => Future(() async {
+    log("-->BBSS.allSent");
     // Simple `await` can't get job done here, because the `_chainedFutures` member
     // in one access time provides last Future, then `await`ing for it allows the library
     // user to add more futures on top of the waited-out Future.
@@ -774,7 +903,7 @@ class BleBluetoothStreamSink<Uint8List> extends StreamSink<Uint8List> implements
       throw this.exception;
     }
 
-    this._chainedFutures =
-        Future.value(); // Just in case if Dart VM is retarded
+    this._chainedFutures = Future.value(); // Just in case if Dart VM is retarded
+    log("<--BBSS.allSent");
   });
 }

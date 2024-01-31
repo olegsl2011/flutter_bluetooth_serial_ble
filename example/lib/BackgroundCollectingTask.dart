@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bluetooth_serial_ble/flutter_bluetooth_serial_ble.dart';
@@ -63,6 +64,8 @@ class BackgroundCollectingTask extends Model {
           break;
         }
       }
+    }, onError: (e, s) {
+      log("(bct._fromConnection) stream error $e $s");
     }).onDone(() {
       inProgress = false;
       notifyListeners();

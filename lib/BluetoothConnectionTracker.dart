@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:developer';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:quick_blue/quick_blue.dart';
+import 'package:quiver/core.dart';
 
 const GSS_SUFFIX = "-0000-1000-8000-00805f9b34fb";
 
@@ -32,7 +34,8 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
     final Map<Pair<String, String>, Stream<Pair<Uint8List, bool>>> _wroteCharStreams = {};
 
     // Some platforms demand uppercase, some demand lowercase.  Facepalm.
-    String _normalizeDevice(String s) {
+    static String _normalizeDevice(String s) {
+        //CHECK These should probably be double-checked
         if (Platform.isWindows) {
             return s.toLowerCase();
         } else {
@@ -40,8 +43,9 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
         }
     }
 
-    String _normalizeService(String s) {
-        if (Platform.isWindows || Platform.isMacOS || Platform.isIOS) {
+    static String _normalizeService(String s) {
+        //CHECK These should probably be double-checked
+        if (Platform.isWindows || Platform.isMacOS || Platform.isIOS || Platform.isLinux) {
             if (s.length == 4) {
                 s = "0000$s$GSS_SUFFIX";
             }
@@ -298,7 +302,23 @@ class Pair<A, B> {
     final A a;
     final B b;
 
-    Pair(this.a, this.b);
+    const Pair(this.a, this.b);
+
+    @override
+    bool operator ==(Object other) {
+        if (!(other is Pair<A, B>)) {
+            return false;
+        }
+        return (a == other.a && b == other.b);
+    }
+
+    @override
+    int get hashCode => hash2(a, b);
+
+    @override
+    String toString() {
+        return "($a,$b)";
+    }
 }
 
 class Token {
@@ -329,4 +349,14 @@ class WaitGroup {
             return _c.future;
         }
     }
+}
+
+bool uuidsEqual(String? a, String? b) {
+    if (a == b) {
+        return true;
+    }
+    if (a == null || b == null) {
+        return false;
+    }
+    return BluetoothCallbackTracker._normalizeService(a) == BluetoothCallbackTracker._normalizeService(b);
 }
