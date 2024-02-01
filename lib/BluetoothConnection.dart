@@ -93,7 +93,9 @@ class BluetoothConnection {
 
   static Future<BluetoothConnection> toAddressBLE(String? address) async {
     var bbc = BleBluetoothConnection(address!);
-    if (!await bbc.connectedStream.first) {
+    var f = bbc.connectedStream.first;
+    bool connected = bbc.isConnected;
+    if (!connected && !await f) {
       //THINK Should this pass along connection errors?  Do the others?  Do the others even throw if connection fails?
       throw Exception("Failed to connect");
     }

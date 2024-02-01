@@ -16,7 +16,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
   bool _manuallyDisconnected = false;
   final String address;
 
-  final _connectedStreamController = StreamController<bool>();
+  final _connectedStreamController = StreamController<bool>(); //DUMMY This doesn't hear from Sink disconnects - is that ok?
   late final connectedStream = _connectedStreamController.stream.asBroadcastStream();
 
   BleBluetoothConnection(this.address) {
@@ -40,11 +40,9 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
 
     BluetoothCallbackTracker.INSTANCE.connect(address);
     //DUMMY Other callbacks?
-    //DUMMY There was a disconnectCallbackReceiver....
+    //MISC There was a disconnectBroadcastReceiver, maybe background disconnects aren't registered on some platforms (Android)?
 
     _listener = this;
-
-    //DUMMY Hang on, I think this is maybe expected to be connected on return?
     log("<--BBC init");
   }
 
@@ -62,7 +60,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
   late BluetoothStreamSink<Uint8List> output = _writeStreamController;
 
   @override
-  bool get isConnected => _connected; //DUMMY Resolve conflict with output.connected
+  bool get isConnected => _connected && output.isConnected; //CHECK Did the && resolve the conflict?
 
   /// Should be called to make sure the connection is closed and resources are freed (sockets/channels).
   void dispose() {
@@ -427,7 +425,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
                 data0 = null;
             }
             if(data.length > _payloadSize) {
-                for(int i=1; i<(data.length+_payloadSize-1)/_payloadSize; i++) {
+                for(int i=1; i<(data.length+_payloadSize-1)~/_payloadSize; i++) {
                     int from = i*_payloadSize;
                     int to = math.min(from+_payloadSize, data.length);
                     _writeBuffer.add(data.sublist(from, to)); //DUMMY Got a range error here: "Invalid value: Not in inclusive range 0..213: 220"
@@ -802,6 +800,8 @@ abstract class SerialListener {
 
 // Almost entirely copied from BluetoothStreamSink
 class BleBluetoothStreamSink<Uint8List> extends StreamSink<Uint8List> implements BluetoothStreamSink<Uint8List> {
+  // For the record, after inspecting the code, I think this is only set once (to false), only in `close()`, and only when the parent is closing.
+  // Hence, I think we don't need to inform the connectedStream.
   /// Describes is stream connected.
   bool isConnected = true;
 
@@ -814,6 +814,20 @@ class BleBluetoothStreamSink<Uint8List> extends StreamSink<Uint8List> implements
   dynamic exception;
 
   var delegate = StreamController<Uint8List>();
+
+  BleBluetoothStreamSink() {
+    // `_doneFuture` must be initialized here because `close` must return the same future.
+    // If it would be in `done` get body, it would result in creating new futures every call.
+    _doneFuture = Future(() async {
+      // @TODO ? is there any better way to do it? xD this below is weird af
+      while (this.isConnected) {
+        await Future.delayed(Duration(milliseconds: 111));
+      }
+      if (this.exception != null) {
+        throw this.exception;
+      }
+    });
+  }
 
   /// Adds raw bytes to the output sink.
   ///
@@ -872,7 +886,7 @@ class BleBluetoothStreamSink<Uint8List> extends StreamSink<Uint8List> implements
   @override
   Future close() {
     log("-->BBSS.close");
-    isConnected = false;
+    isConnected = false; //DUMMY Notify owner?
     log("<--BBSS.close");
     return this.done;
   }
