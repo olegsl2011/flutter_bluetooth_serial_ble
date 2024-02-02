@@ -1,16 +1,10 @@
-import 'dart:async';
-import 'dart:developer';
-import 'dart:math' as math;
-import 'dart:typed_data';
-
-import 'package:flutter_bluetooth_serial_ble/BluetoothConnectionTracker.dart';
-import 'package:flutter_bluetooth_serial_ble/CountdownTimer.dart';
-import 'package:flutter_bluetooth_serial_ble/flutter_bluetooth_serial_ble.dart';
-import 'package:quick_blue/quick_blue.dart';
+part of flutter_bluetooth_serial_ble;
 
 //DUMMY Go back through and check for unused functions; those are probably ones I forgot to use in callbacks
 
 //DUMMY I don't yet know what to do about the original interleaving of data and errors; streams don't support that
+
+//DUMMY I powered off the device, but it did not register disconnect, even when I wrote more data
 
 class BleBluetoothConnection implements SerialListener, BluetoothConnection {
   bool _manuallyDisconnected = false;
@@ -48,6 +42,12 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
 
 
   //// BluetoothConnection, mostly copied
+
+  // These things were for communicating with platform code, which is here replaced with QuickBlue/BluetoothCallbackTracker
+  final int? _id = null;
+  StreamSubscription<Uint8List> get _readStreamSubscription => throw UnimplementedError();
+  set _readStreamSubscription(StreamSubscription<Uint8List> value) => throw UnimplementedError();
+  EventChannel get _readChannel => throw UnimplementedError();
 
   late StreamController<Uint8List> _readStreamController;
 
@@ -799,35 +799,10 @@ abstract class SerialListener {
 }
 
 // Almost entirely copied from BluetoothStreamSink
-class BleBluetoothStreamSink<Uint8List> extends StreamSink<Uint8List> implements BluetoothStreamSink<Uint8List> {
-  // For the record, after inspecting the code, I think this is only set once (to false), only in `close()`, and only when the parent is closing.
-  // Hence, I think we don't need to inform the connectedStream.
-  /// Describes is stream connected.
-  bool isConnected = true;
-
-  /// Chain of features, the variable represents last of the futures.
-  Future<void> _chainedFutures = Future.value(/* Empty future :F */);
-
-  late Future<dynamic> _doneFuture; //DUMMY Not initialized
-
-  /// Exception to be returend from `done` Future, passed from `add` function or related.
-  dynamic exception;
-
+class BleBluetoothStreamSink<Uint8List> extends BluetoothStreamSink<Uint8List> {
   var delegate = StreamController<Uint8List>();
 
-  BleBluetoothStreamSink() {
-    // `_doneFuture` must be initialized here because `close` must return the same future.
-    // If it would be in `done` get body, it would result in creating new futures every call.
-    _doneFuture = Future(() async {
-      // @TODO ? is there any better way to do it? xD this below is weird af
-      while (this.isConnected) {
-        await Future.delayed(Duration(milliseconds: 111));
-      }
-      if (this.exception != null) {
-        throw this.exception;
-      }
-    });
-  }
+  BleBluetoothStreamSink() : super(null);
 
   /// Adds raw bytes to the output sink.
   ///
@@ -857,67 +832,4 @@ class BleBluetoothStreamSink<Uint8List> extends StreamSink<Uint8List> implements
     });
     log("<--BBSS.add");
   }
-
-  /// Unsupported - this ouput sink cannot pass errors to platfom code.
-  @override
-  void addError(Object error, [StackTrace? stackTrace]) {
-    log("-->BBSS.addError $error");
-    throw UnsupportedError("BluetoothConnection output (response) sink cannot receive errors!");
-  }
-
-  @override
-  Future addStream(Stream<Uint8List> stream) => Future(() async {
-    log("-->BBSS.addStream");
-    // @TODO ??? `addStream`, "alternating simultaneous addition" problem (read below)
-    // If `onDone` were called some time after last `add` to the stream (what is okay),
-    // this `addStream` function might wait not for the last "own" addition to this sink,
-    // but might wait for last addition at the moment of the `onDone`.
-    // This can happen if user of the library would use another `add` related function
-    // while `addStream` still in-going. We could do something about it, but this seems
-    // not to be so necessary since `StreamSink` specifies that `addStream` should be
-    // blocking for other forms of `add`ition on the sink.
-    var completer = Completer();
-    stream.listen(this.add).onDone(completer.complete);
-    await completer.future;
-    await _chainedFutures; // Wait last* `add` of the stream to be fulfilled
-    log("<--BBSS.addStream");
-  });
-
-  @override
-  Future close() {
-    log("-->BBSS.close");
-    isConnected = false; //DUMMY Notify owner?
-    log("<--BBSS.close");
-    return this.done;
-  }
-
-  @override
-  Future get done => _doneFuture;
-
-  /// Returns a future which is completed when the sink sent all added data,
-  /// instead of only if the sink got closed.
-  ///
-  /// Might fail with an error in case if some occured while sending the data.
-  /// Typical error could be `StateError("Not connected!")` which could happen
-  /// if disconnected in middle of sending (queued) `add`ed data.
-  ///
-  /// Otherwise, the returned future will complete when either:
-  Future get allSent => Future(() async {
-    log("-->BBSS.allSent");
-    // Simple `await` can't get job done here, because the `_chainedFutures` member
-    // in one access time provides last Future, then `await`ing for it allows the library
-    // user to add more futures on top of the waited-out Future.
-    Future lastFuture;
-    do {
-      lastFuture = this._chainedFutures;
-      await lastFuture;
-    } while (lastFuture != this._chainedFutures);
-
-    if (this.exception != null) {
-      throw this.exception;
-    }
-
-    this._chainedFutures = Future.value(); // Just in case if Dart VM is retarded
-    log("<--BBSS.allSent");
-  });
 }

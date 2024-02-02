@@ -290,6 +290,7 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
     }
 
     void _handleWroteChar(String deviceId, String characteristicId, Uint8List value, bool success) {
+        log("_handleWroteChar $deviceId $characteristicId $success");
         deviceId = _normalizeDevice(deviceId);
         characteristicId = _normalizeService(characteristicId);
         // log('_handleWroteChar $deviceId, $characteristicId, ${value}, $success');
