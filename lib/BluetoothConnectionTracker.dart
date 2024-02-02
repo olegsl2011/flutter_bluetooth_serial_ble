@@ -274,7 +274,7 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
 
     void _handleConnectionChange(String deviceId, BlueConnectionState state) {
         deviceId = _normalizeDevice(deviceId);
-        // log("_handleConnectionChange $deviceId, ${state.value}");
+        log("_handleConnectionChange $deviceId, ${state.value}");
         _ensureConnection(deviceId);
         _connectionSCs[deviceId]!.add(state);
     }

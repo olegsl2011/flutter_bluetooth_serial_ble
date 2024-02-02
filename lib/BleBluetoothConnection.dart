@@ -10,7 +10,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
   bool _manuallyDisconnected = false;
   final String address;
 
-  final _connectedStreamController = StreamController<bool>(); //DUMMY This doesn't hear from Sink disconnects - is that ok?
+  final _connectedStreamController = StreamController<bool>();
   late final connectedStream = _connectedStreamController.stream.asBroadcastStream();
 
   BleBluetoothConnection(this.address) {
@@ -75,7 +75,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
     log("-->BBC.close");
     await disconnect();
     await Future.wait([
-      output.close(), //DUMMY When this threw, the app subsequently couldn't discover devices; find out why
+      output.close(), //CHECK When this threw, the app subsequently couldn't discover devices; find out why.  ...It ALSO won't discover more devices under any other circumstance, soooo....
       (!_readStreamController.isClosed)
           ? _readStreamController.close()
           : Future.value(/* Empty future */)
@@ -99,11 +99,12 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
 
   //// SerialListener
 
+  //THINK Maybe these should just be folded back into their callers
+
   @override
   void onSerialConnect() {
     log("-->BBC.onSerialConnect");
     output.isConnected = true;
-    //DUMMY Do we need to do anything else?  Like, emit a connection event?
     log("<--BBC.onSerialConnect");
   }
 
@@ -111,7 +112,6 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
   void onSerialConnectError(Exception e) {
     log("-->BBC.onSerialConnectError");
     _readStreamController.addError(e);
-    //DUMMY Do we need to do anything else?
     log("<--BBC.onSerialConnectError");
   }
 
@@ -119,7 +119,6 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
   void onSerialIoError(Exception e) {
     log("-->BBC.onSerialIoError");
     _readStreamController.addError(e);
-    //DUMMY Do we need to do anything else?
     log("<--BBC.onSerialIoError");
   }
 
@@ -514,6 +513,8 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
     void _onSerialConnectError(Exception e) {
         log("-->BBC._onSerialConnectError");
         _canceled = true;
+        _connected = false; //THINK I'm not entirely sure adding this here won't cause unintended problems, buuuut....
+        _connectedStreamController.add(_connected);
         if (_listener != null)
             _listener!.onSerialConnectError(e);
         log("<--BBC._onSerialConnectError");
@@ -530,6 +531,10 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
         log("-->BBC._onSerialIoError");
         _writePending = false;
         _canceled = true;
+        //DITTO
+        //CHECK Should we close the Sink or something?  Call QB.disconnect?
+        _connected = false;
+        _connectedStreamController.add(_connected);
         if (_listener != null)
             _listener!.onSerialIoError(e);
         log("<--BBC._onSerialIoError");
