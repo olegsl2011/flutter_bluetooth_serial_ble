@@ -50,9 +50,11 @@ class _ChatPage extends State<ChatPage> {
         isDisconnecting = false;
       });
 
+      log("(cp.initState) stream listen");
       connection!.input!.listen(_onDataReceived, onError: (e, s) {
         log("(cp.initState) stream error $e $s");
       }).onDone(() {
+        log("(cp.initState) stream done");
         // Example: Detect which side closed the connection
         // There should be `isDisconnecting` flag to show are we are (locally)
         // in middle of disconnecting process, should be set before calling
@@ -68,6 +70,7 @@ class _ChatPage extends State<ChatPage> {
           setState(() {});
         }
       });
+      log("(cp.initState) stream listened");
     }).catchError((error) {
       print('Cannot connect, exception occured');
       print(error);
@@ -166,6 +169,7 @@ class _ChatPage extends State<ChatPage> {
   }
 
   void _onDataReceived(Uint8List data) {
+    log("-->cp._onDataReceived");
     // Allocate buffer for parsed data
     int backspacesCounter = 0;
     data.forEach((byte) {
@@ -212,6 +216,7 @@ class _ChatPage extends State<ChatPage> {
               0, _messageBuffer.length - backspacesCounter)
           : _messageBuffer + dataString);
     }
+    log("<--cp._onDataReceived");
   }
 
   void _sendMessage(String text) async {

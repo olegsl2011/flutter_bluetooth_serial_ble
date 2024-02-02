@@ -231,6 +231,7 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
         deviceId = _normalizeDevice(deviceId);
         service = _normalizeService(service);
         characteristic = _normalizeService(characteristic);
+        //CHECK This is failing on Android, and I don't know why.  "Characteristic unavailable".
         return QuickBlue.writeValue(deviceId, service, characteristic, data, BleOutputProperty.withResponse); // On Mac, this doesn't work withoutResponse ... Ok, it's no longer working WITH it.  :|
     }
 
@@ -274,7 +275,6 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
 
     void _handleConnectionChange(String deviceId, BlueConnectionState state) {
         deviceId = _normalizeDevice(deviceId);
-        log("_handleConnectionChange $deviceId, ${state.value}");
         _ensureConnection(deviceId);
         _connectionSCs[deviceId]!.add(state);
     }
