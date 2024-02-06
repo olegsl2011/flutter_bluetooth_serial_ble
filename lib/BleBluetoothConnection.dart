@@ -1,6 +1,8 @@
 part of flutter_bluetooth_serial_ble;
 
 //DUMMY I powered off the device, but it did not register disconnect, even when I wrote more data
+//THINK So, one of my assumptions was that stream errors close the stream.  This apparently isn't necessarily true, and so some of this code may have related bugs in it.
+//RAINY This could probably be significantly simplified - factor out the extraneous Listener class, remove some of the unused legacy methods, etc.
 
 class BleBluetoothConnection implements SerialListener, BluetoothConnection {
   bool _manuallyDisconnected = false;
@@ -339,7 +341,6 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
         // }
 
         // I've opted for async, here, but it's possible it should have been sync
-        //CHECK Is this really the only char subscription we make?  Really??
         _stuffToCancel.add(BluetoothCallbackTracker.INSTANCE.subscribeForCharacteristicValues(address, _readCharacteristic!).listen((event) async {
             await onCharacteristicChanged(_readCharacteristic!, event);
         }, onError: (e, s) {
@@ -436,7 +437,6 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
             }
         // }
         if(data0 != null) {
-            //DUMMY Can this overlap with _writeNext?  It probably shouldn't.
             final wc = _writeCharacteristic!;
             unawaited(BluetoothCallbackTracker.INSTANCE.subscribeForWroteCharacteristic(address, wc).first.then((value) async {
                 await onCharacteristicWrite(wc, value.b);
@@ -519,6 +519,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
         _connectedStreamController.add(_connected);
         if (_listener != null)
             _listener!.onSerialConnectError(e);
+        unawaited(close()); //CHECK I'm not sure about adding this, but it feels like a good idea
         log("<--BBC._onSerialConnectError");
     }
 
@@ -534,11 +535,11 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
         _writePending = false;
         _canceled = true;
         //DITTO
-        //CHECK Should we close the Sink or something?  Call QB.disconnect?
         _connected = false;
         _connectedStreamController.add(_connected);
         if (_listener != null)
             _listener!.onSerialIoError(e);
+        unawaited(close()); //CHECK I'm not sure about adding this, but it feels like a good idea
         log("<--BBC._onSerialIoError");
     }
 }
