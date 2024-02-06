@@ -30,8 +30,8 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
     final Map<String, Stream<Pair<String, Uint8List>>> _deviceValueStreams = {};
     final Map<Pair<String, String>, StreamController<Uint8List>> _charValueSCs = {};
     final Map<Pair<String, String>, Stream<Uint8List>> _charValueStreams = {};
-    final Map<Pair<String, String>, StreamController<Pair<Uint8List, bool>>> _wroteCharSCs = {};
-    final Map<Pair<String, String>, Stream<Pair<Uint8List, bool>>> _wroteCharStreams = {};
+    final Map<Pair<String, String>, StreamController<Pair<Uint8List?, bool>>> _wroteCharSCs = {};
+    final Map<Pair<String, String>, Stream<Pair<Uint8List?, bool>>> _wroteCharStreams = {};
 
     // Some platforms demand uppercase, some demand lowercase.  Facepalm.
     static String _normalizeDevice(String s) {
@@ -154,7 +154,7 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
      * Subscribe to notifications of success of outgoing writes to characteristics.<br/>
      * Stream is of characteristic `value` (exactly what that means may depend on platform, not sure) and `success`.<br/>
      */ //DUMMY Should probably support same chars on different services
-    Stream<Pair<Uint8List, bool>> subscribeForWroteCharacteristic(String deviceId, String characteristicId) {
+    Stream<Pair<Uint8List?, bool>> subscribeForWroteCharacteristic(String deviceId, String characteristicId) {
         deviceId = _normalizeDevice(deviceId);
         characteristicId = _normalizeService(characteristicId);
         _ensureWroteChar(deviceId, characteristicId);
@@ -289,7 +289,7 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
         _deviceValueSCs[deviceId]!.add(Pair(characteristicId, value));
     }
 
-    void _handleWroteChar(String deviceId, String characteristicId, Uint8List value, bool success) {
+    void _handleWroteChar(String deviceId, String characteristicId, Uint8List? value, bool success) {
         log("_handleWroteChar $deviceId $characteristicId $success");
         deviceId = _normalizeDevice(deviceId);
         characteristicId = _normalizeService(characteristicId);
