@@ -226,13 +226,13 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
         await QuickBlue.readValue(deviceId, service, characteristic);
         return await fVal;
     }
-    Future<void> writeValue(String deviceId, String service, String characteristic, Uint8List data) async {
+    Future<void> writeValue(String deviceId, String service, String characteristic, Uint8List data, {bool withoutResponse = false}) async {
         await _initialized.wait();
         deviceId = _normalizeDevice(deviceId);
         service = _normalizeService(service);
         characteristic = _normalizeService(characteristic);
         //CHECK This is failing on Android, and I don't know why.  "Characteristic unavailable".
-        return QuickBlue.writeValue(deviceId, service, characteristic, data, BleOutputProperty.withResponse); // On Mac, this doesn't work withoutResponse ... Ok, it's no longer working WITH it.  :|
+        return QuickBlue.writeValue(deviceId, service, characteristic, data, withoutResponse ? BleOutputProperty.withoutResponse : BleOutputProperty.withResponse); // On Mac, this doesn't work withoutResponse ... Ok, it's no longer working WITH it.  :|
     }
 
 

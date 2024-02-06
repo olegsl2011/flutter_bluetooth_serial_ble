@@ -5,6 +5,8 @@ part of flutter_bluetooth_serial_ble;
 //DUMMY I don't yet know what to do about the original interleaving of data and errors; streams don't support that
 
 //DUMMY I powered off the device, but it did not register disconnect, even when I wrote more data
+//DUMMY Find and ensure cancel all BluetoothCallbackTracker.INSTANCE subscriptions
+//    Check near setNotifiable
 
 class BleBluetoothConnection implements SerialListener, BluetoothConnection {
   bool _manuallyDisconnected = false;
@@ -126,7 +128,6 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
   void onSerialRead(Uint8List data) {
     log("-->BBC.onSerialRead");
     _readStreamController.add(data);
-    //DUMMY Do we need to do anything else?
     log("<--BBC.onSerialRead");
   }
 
@@ -160,7 +161,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
 
     SerialListener? _listener;
     _DeviceDelegate? _delegate;
-    String? _readService, _writeService; //DUMMY Make sure to set these
+    String? _readService, _writeService;
     String? _readCharacteristic, _writeCharacteristic;
 
     bool _writePending = false;
@@ -168,11 +169,16 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
     bool _connected = false;
     int _payloadSize = _DEFAULT_MTU-3;
 
+    List<StreamSubscription> _stuffToCancel = [];
+
     Future<void> disconnect() async {
         log("-->BBC.disconnect");
         _listener = null; // ignore remaining data and errors
         // address = null;
         _canceled = true;
+        for (var s in _stuffToCancel) {
+          unawaited(s.cancel().catchError((e) {}));
+        }
         _servicesTimeout.reset();
         _services = {};
         // synchronized (_writeBuffer)
@@ -186,8 +192,11 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
         _writeService = null;
         if (_delegate != null)
             _delegate!.disconnect();
-        //THINK ...Should it await?
-        await BluetoothCallbackTracker.INSTANCE.disconnect(address);
+        try {
+            await BluetoothCallbackTracker.INSTANCE.disconnect(address);
+        } catch (e, s) {
+          // Eh, ignore errors here I guess
+        }
         _connected = false;
         _connectedStreamController.add(_connected);
         log("<--BBC.disconnect");
@@ -202,7 +211,6 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
             throw Exception("already connected");
         _canceled = false;
         this._listener = listener;
-        //DUMMY There was ALSO a disconnectBroadcastReceiver here??
         log("connect $address");
         await BluetoothCallbackTracker.INSTANCE.connect(address);
         // continues asynchronously in onPairingBroadcastReceive() and onConnectionStateChange()
@@ -221,25 +229,24 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
         if (state == BlueConnectionState.connected) {
             log("connect status $state, discoverServices");
             try {
-              //DUMMY We should probably cancel this in `disconnect` and so forth
-              BluetoothCallbackTracker.INSTANCE.subscribeForServiceResults(deviceId).listen((event) {
-                log("-->BBC._onConnectionStateChange.service discovered $event");
-                var cs = _services[event.a];
-                if (cs == null) {
-                  cs = Set();
-                  _services[event.a] = cs;
-                }
-                cs.addAll(event.b);
-                _servicesTimeout.delay(Duration(milliseconds: 500)).then((value) {
-                  log("-->BBC._onConnectionStateChange.@serviceDiscovered.@timeout");
-                  _onServicesDiscovered();
-                  log("<--BBC._onConnectionStateChange.@serviceDiscovered.@timeout");
-                }, onError: (e) {});
-                log("<--BBC._onConnectionStateChange.service discovered");
-              });
-              await BluetoothCallbackTracker.INSTANCE.discoverServices(deviceId);
+                _stuffToCancel.add(BluetoothCallbackTracker.INSTANCE.subscribeForServiceResults(deviceId).listen((event) {
+                    log("-->BBC._onConnectionStateChange.service discovered $event");
+                    var cs = _services[event.a];
+                    if (cs == null) {
+                        cs = Set();
+                        _services[event.a] = cs;
+                    }
+                    cs.addAll(event.b);
+                    _servicesTimeout.delay(Duration(milliseconds: 500)).then((value) {
+                        log("-->BBC._onConnectionStateChange.@serviceDiscovered.@timeout");
+                        _onServicesDiscovered();
+                        log("<--BBC._onConnectionStateChange.@serviceDiscovered.@timeout");
+                    }, onError: (e) {});
+                    log("<--BBC._onConnectionStateChange.service discovered");
+                }));
+                await BluetoothCallbackTracker.INSTANCE.discoverServices(deviceId);
             } catch (e, s) {
-              _onSerialConnectError(Exception("discoverServices failed"));
+                _onSerialConnectError(Exception("discoverServices failed"));
             }
         } else if (state == BlueConnectionState.disconnected) {
             if (_connected)
@@ -319,7 +326,6 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
 
     void onMtuChanged(int mtu, bool success) {
         log("-->BBC.onMtuChanged $mtu $success");
-        //DUMMY Integrate
         log("mtu size $mtu");
         if(success) {
             _payloadSize = mtu - 3;
@@ -341,19 +347,23 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
 
         // I've opted for async, here, but it's possible it should have been sync
         //CHECK Is this really the only char subscription we make?  Really??
-        BluetoothCallbackTracker.INSTANCE.subscribeForCharacteristicValues(address, _readCharacteristic!).listen((event) {
+        _stuffToCancel.add(BluetoothCallbackTracker.INSTANCE.subscribeForCharacteristicValues(address, _readCharacteristic!).listen((event) {
             onCharacteristicChanged(_readCharacteristic!, event);
-        }).onError((e, s) {
+        }, onError: (e, s) {
             _onSerialConnectError(Exception("no notification for read characteristic, or read error"));
-        }); //THINK Maybe onDone?
-        //CHECK Should this fall back to INDICATE on failure?
+        })); //THINK Maybe onDone?
         log("enable read notification....");
         BluetoothCallbackTracker.INSTANCE.setNotifiable(address, _readService!, _readCharacteristic!, BleInputProperty.notification).then((value) async {
             onDescriptorWrite(_readCharacteristic!, true);
         }, onError: (e, s) async {
-            log("set notifiable readCharacteristic error $e $s");
-            onDescriptorWrite(_readCharacteristic!, false);
-            _onSerialConnectError(Exception("no notification for read characteristic")); // This may be redundant
+            log("set notifiable readCharacteristic error, trying indication");
+            unawaited(BluetoothCallbackTracker.INSTANCE.setNotifiable(address, _readService!, _readCharacteristic!, BleInputProperty.indication).then((value) async {
+                onDescriptorWrite(_readCharacteristic!, true);
+            }, onError: (e, s) async {
+                log("set notifiable readCharacteristic error $e $s");
+                onDescriptorWrite(_readCharacteristic!, false);
+                _onSerialConnectError(Exception("no notification for read characteristic")); // This may be redundant
+            }));
         });
         log("<--BBC._connectCharacteristics3");
     }
@@ -384,7 +394,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
     /*
      * read
      */
-    void onCharacteristicChanged(String characteristic, Uint8List data) { //DUMMY Check this is called where it should be
+    void onCharacteristicChanged(String characteristic, Uint8List data) {
         log("-->BBC.onCharacteristicChanged");
         if(_canceled) {
             log("<--BBC.onCharacteristicChanged");
@@ -427,24 +437,23 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
                 for(int i=1; i<(data.length+_payloadSize-1)~/_payloadSize; i++) {
                     int from = i*_payloadSize;
                     int to = math.min(from+_payloadSize, data.length);
-                    _writeBuffer.add(data.sublist(from, to)); //DUMMY Got a range error here: "Invalid value: Not in inclusive range 0..213: 220"
+                    _writeBuffer.add(data.sublist(from, to));
                     log("write queued, len=${to-from}");
                 }
             }
         // }
         if(data0 != null) {
-            try {
-                //DUMMY "true, if the write operation was initiated successfully" so, make async again I guess
-                //CHECK Can this overlap with _writeNext?  It probably shouldn't.
-                final wc = _writeCharacteristic!;
-                unawaited(BluetoothCallbackTracker.INSTANCE.subscribeForWroteCharacteristic(address, wc).first.then((value) async {
-                  await onCharacteristicWrite(wc, value.b);
-                }));
-                await BluetoothCallbackTracker.INSTANCE.writeValue(address, _writeService!, wc, data0);
-                log("write started, len=${data0.length}");
-            } catch (e, s) {
+            //DUMMY Can this overlap with _writeNext?  It probably shouldn't.
+            final wc = _writeCharacteristic!;
+            unawaited(BluetoothCallbackTracker.INSTANCE.subscribeForWroteCharacteristic(address, wc).first.then((value) async {
+                await onCharacteristicWrite(wc, value.b);
+            }));
+            final data1 = data0;
+            unawaited(BluetoothCallbackTracker.INSTANCE.writeValue(address, _writeService!, wc, data0).then((value) {
+                log("write started, len=${data1.length}");
+            }, onError: (e, s) {
                 _onSerialIoError(Exception("write failed"));
-            }
+            }));
         }
         // continues asynchronously in onCharacteristicWrite()
         log("<--BBC.write");
@@ -675,17 +684,24 @@ class _TelitDelegate extends _DeviceDelegate {
             log("<--_TelitDelegate.connectCharacteristics");
             return false;
         }
-        //DUMMY What about the callback?
-        BluetoothCallbackTracker.INSTANCE.setNotifiable(owner.address, service, _readCreditsCharacteristic!, BleInputProperty.indication).onError((error, stackTrace) {
+        owner._stuffToCancel.add(BluetoothCallbackTracker.INSTANCE.subscribeForCharacteristicValues(owner.address, _readCreditsCharacteristic!).listen((event) {
+            owner.onCharacteristicChanged(_readCreditsCharacteristic!, event);
+        }, onError: (e, s) {
+            owner._onSerialConnectError(Exception("no notification for read characteristic, or read error"));
+        })); //THINK Maybe onDone?
+        BluetoothCallbackTracker.INSTANCE.setNotifiable(owner.address, service, _readCreditsCharacteristic!, BleInputProperty.indication).then((value) {
+            owner.onDescriptorWrite(_readCreditsCharacteristic!, true);
+        }, onError: (error, stackTrace) {
+            owner.onDescriptorWrite(_readCreditsCharacteristic!, false);
             owner._onSerialConnectError(Exception("no notification for read credits characteristic"));
         });
         log("<--_TelitDelegate.connectCharacteristics");
-        return false; //CHECK ...Wait, it ALWAYS returns false?  Same in original
+        return false;
         // continues asynchronously in connectCharacteristics2
     }
 
     @override
-    void onDescriptorWrite(String characteristic, bool success) { //DUMMY Do we need to call this on failure?
+    void onDescriptorWrite(String characteristic, bool success) {
         log("-->_TelitDelegate.onDescriptorWrite $characteristic $success");
         if(uuidsEqual(characteristic, _readCreditsCharacteristic)) {
             log("writing read credits characteristic descriptor finished, success=$success");
@@ -698,10 +714,9 @@ class _TelitDelegate extends _DeviceDelegate {
         if(uuidsEqual(characteristic, owner._readCharacteristic)) {
             log("writing read characteristic descriptor finished, success=$success");
             if (success) {
-                //CHECK ???
                 // owner._readCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
                 // owner._writeCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
-                grantReadCredits(); //DUMMY async
+                unawaited(grantReadCredits()); // The asyncness of this call varies, but I THINK this should be ok
                 // grantReadCredits includes gatt.writeCharacteristic(writeCreditsCharacteristic)
                 // but we do not have to wait for confirmation, as it is the last write of connect phase.
                 //CHECK Does it matter that we'll probably get a response?
@@ -782,9 +797,10 @@ class _TelitDelegate extends _DeviceDelegate {
             try {
                 final wc = _writeCreditsCharacteristic!;
                 unawaited(BluetoothCallbackTracker.INSTANCE.subscribeForWroteCharacteristic(owner.address, wc).first.then((value) async {
+                  //CHECK Does this get called if write is withoutResponse?
                   await owner.onCharacteristicWrite(wc, value.b);
                 }));
-                await BluetoothCallbackTracker.INSTANCE.writeValue(owner.address, owner._writeService!, wc, data);
+                await BluetoothCallbackTracker.INSTANCE.writeValue(owner.address, owner._writeService!, wc, data, withoutResponse: true);
             } catch (e, s) {
                 if(owner._connected)
                     owner._onSerialIoError(Exception("write read credits failed"));
