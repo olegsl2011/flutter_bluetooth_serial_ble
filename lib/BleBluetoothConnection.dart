@@ -1,12 +1,6 @@
 part of flutter_bluetooth_serial_ble;
 
-//DUMMY Go back through and check for unused functions; those are probably ones I forgot to use in callbacks
-
-//DUMMY I don't yet know what to do about the original interleaving of data and errors; streams don't support that
-
 //DUMMY I powered off the device, but it did not register disconnect, even when I wrote more data
-//DUMMY Find and ensure cancel all BluetoothCallbackTracker.INSTANCE subscriptions
-//    Check near setNotifiable
 
 class BleBluetoothConnection implements SerialListener, BluetoothConnection {
   bool _manuallyDisconnected = false;
@@ -28,14 +22,13 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
     // Start the connected stream broadcasting
     connectedStream.listen((c) {});
 
-    BluetoothCallbackTracker.INSTANCE.subscribeForConnectionResults(address).listen((event) {
+    _stuffToCancel.add(BluetoothCallbackTracker.INSTANCE.subscribeForConnectionResults(address).listen((event) async {
       log("-->BCT.connectionResult $event");
-      _onConnectionStateChange(address, event);
+      await _onConnectionStateChange(address, event);
       log("<--BCT.connectionResult");
-    });
+    }));
 
     BluetoothCallbackTracker.INSTANCE.connect(address);
-    //DUMMY Other callbacks?
     //MISC There was a disconnectBroadcastReceiver, maybe background disconnects aren't registered on some platforms (Android)?
 
     _listener = this;
@@ -205,7 +198,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
     /**
      * connect-success and most connect-errors are returned asynchronously to listener
      */
-    Future<void> connect(SerialListener listener) async {
+    Future<void> connect(SerialListener listener) async { // This was basically copied into the constructor
         log("-->BBC.connect");
         if(_connected || _manuallyDisconnected) // I don't know what the result would be of permitting you to reconnect; it seems like the original code was written not to allow that.
             throw Exception("already connected");
@@ -312,7 +305,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
     void _connectCharacteristics2() {
         log("-->BBC._connectCharacteristics2");
         if (false) {
-            //DUMMY Try to set max MTU.  But I don't trust QuickBlue's one-channel notification stream under the hood.
+            //RAINY Try to set max MTU.  But I don't trust QuickBlue's one-channel notification stream under the hood.
             // log("request max MTU");
             // if (!gatt.requestMtu(_MAX_MTU))
             //     _onSerialConnectError(Exception("request MTU failed"));
@@ -347,8 +340,8 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
 
         // I've opted for async, here, but it's possible it should have been sync
         //CHECK Is this really the only char subscription we make?  Really??
-        _stuffToCancel.add(BluetoothCallbackTracker.INSTANCE.subscribeForCharacteristicValues(address, _readCharacteristic!).listen((event) {
-            onCharacteristicChanged(_readCharacteristic!, event);
+        _stuffToCancel.add(BluetoothCallbackTracker.INSTANCE.subscribeForCharacteristicValues(address, _readCharacteristic!).listen((event) async {
+            await onCharacteristicChanged(_readCharacteristic!, event);
         }, onError: (e, s) {
             _onSerialConnectError(Exception("no notification for read characteristic, or read error"));
         })); //THINK Maybe onDone?
@@ -394,13 +387,13 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
     /*
      * read
      */
-    void onCharacteristicChanged(String characteristic, Uint8List data) {
+    Future<void> onCharacteristicChanged(String characteristic, Uint8List data) async {
         log("-->BBC.onCharacteristicChanged");
         if(_canceled) {
             log("<--BBC.onCharacteristicChanged");
             return;
         }
-        _delegate!.onCharacteristicChanged(characteristic, data);
+        await _delegate!.onCharacteristicChanged(characteristic, data);
         if(_canceled) {
             log("<--BBC.onCharacteristicChanged");
             return;
@@ -415,7 +408,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
     /*
      * write
      */
-    Future<void> write(Uint8List data) async { //DUMMY Check asyncs
+    Future<void> write(Uint8List data) async {
         log("-->BBC.write");
         if(_canceled || !_connected || _writeCharacteristic == null)
             throw Exception("not connected");
@@ -483,7 +476,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
         log("<--BBC.onCharacteristicWrite");
     }
 
-    Future<void> _writeNext() async { //DUMMY propagate async
+    Future<void> _writeNext() async {
         log("-->BBC._writeNext");
         final Uint8List data;
         // synchronized (writeBuffer) {
@@ -558,11 +551,10 @@ class _DeviceDelegate {
 
     _DeviceDelegate(this.owner);
 
-    //DUMMY Check that asyncs called properly
     bool connectCharacteristics(String service) { return true; }
     // following methods only overwritten for Telit devices
     void onDescriptorWrite(String characteristic, bool success) { /*nop*/ }
-    void onCharacteristicChanged(String c, Uint8List data) {/*nop*/ }
+    Future<void> onCharacteristicChanged(String c, Uint8List data) async { /*nop*/ }
     void onCharacteristicWrite(String c, bool success) { /*nop*/ }
     bool canWrite() { return true; }
     void disconnect() {/*nop*/ }
@@ -684,8 +676,8 @@ class _TelitDelegate extends _DeviceDelegate {
             log("<--_TelitDelegate.connectCharacteristics");
             return false;
         }
-        owner._stuffToCancel.add(BluetoothCallbackTracker.INSTANCE.subscribeForCharacteristicValues(owner.address, _readCreditsCharacteristic!).listen((event) {
-            owner.onCharacteristicChanged(_readCreditsCharacteristic!, event);
+        owner._stuffToCancel.add(BluetoothCallbackTracker.INSTANCE.subscribeForCharacteristicValues(owner.address, _readCreditsCharacteristic!).listen((event) async {
+            await owner.onCharacteristicChanged(_readCreditsCharacteristic!, event);
         }, onError: (e, s) {
             owner._onSerialConnectError(Exception("no notification for read characteristic, or read error"));
         })); //THINK Maybe onDone?
