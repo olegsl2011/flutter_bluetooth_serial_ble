@@ -239,7 +239,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
                     }, onError: (e) {});
                     log("<--BBC._onConnectionStateChange.service discovered");
                 }));
-                await BluetoothCallbackTracker.INSTANCE.discoverServices(deviceId);
+                await BluetoothCallbackTracker.INSTANCE.discoverServices(deviceId); //CHECK This sometimes...just doesn't do anything.  >8|
             } catch (e, s) {
                 _onSerialConnectError(Exception("discoverServices failed"));
             }
