@@ -87,7 +87,7 @@ class BluetoothConnection {
       case ConnectionType.BLE:
         return toAddressBLE(address);
       case ConnectionType.OLD_BLE:
-        return toAddressBLE(address);
+        return toAddressOldBLE(address);
     }
   }
 
