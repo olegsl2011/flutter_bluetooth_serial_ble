@@ -106,7 +106,7 @@ class BluetoothCallbackTracker { //TODO Make static instead of singleton?
         characteristicId = _normalizeService(characteristicId);
         final p = Pair(deviceId, characteristicId);
         if (!_wroteCharSCs.containsKey(p)) {
-            final sc = StreamController<Pair<Uint8List, bool>>();
+            final sc = StreamController<Pair<Uint8List?, bool>>();
             _wroteCharSCs[p] = sc;
             final s = sc.stream.asBroadcastStream();
             s.listen((m) {});
