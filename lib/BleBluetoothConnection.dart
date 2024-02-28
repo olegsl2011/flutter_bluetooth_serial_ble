@@ -212,7 +212,6 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
         log("<--BBC.connect");
     }
 
-    //SHAME Turns out you're allowed to have multiple characteristics with the same UUID (bleh), and this does not accommodate that.
     Map<String, Set<String>> _services = {};
 
     final _servicesTimeout = CountdownTimer(); //THINK Not sure if class field, or local var
@@ -271,13 +270,13 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
         bool sync = true;
         _writePending = false;
         for (String gattService in _services.keys) {
-            if (uuidsEqual(gattService, _BLUETOOTH_LE_CC254X_SERVICE))
+            if (uuidAisaB(gattService, _BLUETOOTH_LE_CC254X_SERVICE))
                 _delegate = new _Cc245XDelegate(this);
-            if (uuidsEqual(gattService, _BLUETOOTH_LE_MICROCHIP_SERVICE))
+            if (uuidAisaB(gattService, _BLUETOOTH_LE_MICROCHIP_SERVICE))
                 _delegate = new _MicrochipDelegate(this);
-            if (uuidsEqual(gattService, _BLUETOOTH_LE_NRF_SERVICE))
+            if (uuidAisaB(gattService, _BLUETOOTH_LE_NRF_SERVICE))
                 _delegate = new _NrfDelegate(this);
-            if (uuidsEqual(gattService, _BLUETOOTH_LE_TIO_SERVICE))
+            if (uuidAisaB(gattService, _BLUETOOTH_LE_TIO_SERVICE))
                 _delegate = new _TelitDelegate(this);
 
             if(_delegate != null) {
@@ -341,7 +340,7 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
         // }
 
         // I've opted for async, here, but it's possible it should have been sync
-        _stuffToCancel.add(BluetoothCallbackTracker.INSTANCE.subscribeForCharacteristicValues(address, _readCharacteristic!).listen((event) async {
+        _stuffToCancel.add(BluetoothCallbackTracker.INSTANCE.subscribeForCharacteristicValues(address, _readService!, _readCharacteristic!).listen((event) async {
             await onCharacteristicChanged(_readCharacteristic!, event);
         }, onError: (e, s) {
             _onSerialConnectError(Exception("no notification for read characteristic, or read error"));
@@ -437,12 +436,13 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
             }
         // }
         if(data0 != null) {
+            final ws = _writeService!;
             final wc = _writeCharacteristic!;
-            unawaited(BluetoothCallbackTracker.INSTANCE.subscribeForWroteCharacteristic(address, wc).first.then((value) async {
+            unawaited(BluetoothCallbackTracker.INSTANCE.subscribeForWroteCharacteristic(address, ws, wc).first.then((value) async {
                 await onCharacteristicWrite(wc, value.b);
             }));
             final data1 = data0;
-            unawaited(BluetoothCallbackTracker.INSTANCE.writeValue(address, _writeService!, wc, data0).then((value) {
+            unawaited(BluetoothCallbackTracker.INSTANCE.writeValue(address, ws, wc, data0).then((value) {
                 log("write started, len=${data1.length}");
             }, onError: (e, s) {
                 _onSerialIoError(Exception("write failed"));
@@ -453,6 +453,8 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
     }
 
     // Note - this is for when we WRITE to ble
+    //RAINY Probably should add service param
+    //DUMMY Oh - this is gonna need changed for XString, too - uuidAisaB
     Future<void> onCharacteristicWrite(String characteristic, bool success) async {
         log("-->BBC.onCharacteristicWrite $characteristic $success");
         if(_canceled || !_connected || _writeCharacteristic == null) {
@@ -490,11 +492,12 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
             }
         // }
         try {
+            final ws = _writeService!;
             final wc = _writeCharacteristic!;
-            unawaited(BluetoothCallbackTracker.INSTANCE.subscribeForWroteCharacteristic(address, wc).first.then((value) async {
+            unawaited(BluetoothCallbackTracker.INSTANCE.subscribeForWroteCharacteristic(address, ws, wc).first.then((value) async {
               await onCharacteristicWrite(wc, value.b);
             }));
-            await BluetoothCallbackTracker.INSTANCE.writeValue(address, _writeService!, wc, data);
+            await BluetoothCallbackTracker.INSTANCE.writeValue(address, ws, wc, data);
             log("write started, len=${data.length}");
         } catch (e, s) {
             _onSerialIoError(Exception("write failed"));
@@ -592,7 +595,7 @@ class _MicrochipDelegate extends _DeviceDelegate {
         owner._readService = service;
         owner._writeCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_MICROCHIP_CHAR_W;
         owner._writeService = service;
-        if(owner._services[service]?.contains(owner._writeCharacteristic) ?? false) {
+        if(owner._services[service]?.any((c) => uuidAisaB(c, owner._writeCharacteristic!)) ?? false) {
             owner._writeCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_MICROCHIP_CHAR_RW;
             owner._writeService = service;
         }
@@ -657,27 +660,27 @@ class _TelitDelegate extends _DeviceDelegate {
         owner._writeService = service;
         _readCreditsCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_TIO_CHAR_RX_CREDITS;
         _writeCreditsCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_TIO_CHAR_TX_CREDITS;
-        if (owner._services[service]?.contains(owner._readCharacteristic) ?? false) {
+        if (owner._services[service]?.any((c) => uuidAisaB(c, owner._readCharacteristic!)) ?? false) {
             owner._onSerialConnectError(Exception("read characteristic not found"));
             log("<--_TelitDelegate.connectCharacteristics");
             return false;
         }
-        if (owner._services[service]?.contains(owner._writeCharacteristic) ?? false) {
+        if (owner._services[service]?.any((c) => uuidAisaB(c, owner._writeCharacteristic!)) ?? false) {
             owner._onSerialConnectError(Exception("write characteristic not found"));
             log("<--_TelitDelegate.connectCharacteristics");
             return false;
         }
-        if (owner._services[service]?.contains(_readCreditsCharacteristic) ?? false) {
+        if (owner._services[service]?.any((c) => uuidAisaB(c, _readCreditsCharacteristic!)) ?? false) {
             owner._onSerialConnectError(Exception("read credits characteristic not found"));
             log("<--_TelitDelegate.connectCharacteristics");
             return false;
         }
-        if (owner._services[service]?.contains(_writeCreditsCharacteristic) ?? false) {
+        if (owner._services[service]?.any((c) => uuidAisaB(c, _writeCreditsCharacteristic!)) ?? false) {
             owner._onSerialConnectError(Exception("write credits characteristic not found"));
             log("<--_TelitDelegate.connectCharacteristics");
             return false;
         }
-        owner._stuffToCancel.add(BluetoothCallbackTracker.INSTANCE.subscribeForCharacteristicValues(owner.address, _readCreditsCharacteristic!).listen((event) async {
+        owner._stuffToCancel.add(BluetoothCallbackTracker.INSTANCE.subscribeForCharacteristicValues(owner.address, service, _readCreditsCharacteristic!).listen((event) async {
             await owner.onCharacteristicChanged(_readCreditsCharacteristic!, event);
         }, onError: (e, s) {
             owner._onSerialConnectError(Exception("no notification for read characteristic, or read error"));
@@ -788,12 +791,13 @@ class _TelitDelegate extends _DeviceDelegate {
             Uint8List data = Uint8List.fromList([newCredits]);
             log("grant read credits +$newCredits =$_readCredits");
             try {
+                final ws = owner._writeService!!;
                 final wc = _writeCreditsCharacteristic!;
-                unawaited(BluetoothCallbackTracker.INSTANCE.subscribeForWroteCharacteristic(owner.address, wc).first.then((value) async {
+                unawaited(BluetoothCallbackTracker.INSTANCE.subscribeForWroteCharacteristic(owner.address, ws, wc).first.then((value) async {
                   //CHECK Does this get called if write is withoutResponse?
                   await owner.onCharacteristicWrite(wc, value.b);
                 }));
-                await BluetoothCallbackTracker.INSTANCE.writeValue(owner.address, owner._writeService!, wc, data, withoutResponse: true);
+                await BluetoothCallbackTracker.INSTANCE.writeValue(owner.address, ws, wc, data, withoutResponse: true);
             } catch (e, s) {
                 if(owner._connected)
                     owner._onSerialIoError(Exception("write read credits failed"));

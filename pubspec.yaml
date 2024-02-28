@@ -21,7 +21,7 @@ dependencies:
   quick_blue:
     git: #TODO Ideally, the fixes here would eventually propagate back to https://github.com/woodemi/quick.flutter and we could remove the link.  They've only responded to a few of my bug reports, though.
       url: https://github.com/erhannis/quick.flutter.git
-      ref: feature/on_write_characteristic
+      ref: feature/duplicate_characteristics
       path: packages/quick_blue
   quiver: ^3.1.0
 
