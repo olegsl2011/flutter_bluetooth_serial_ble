@@ -595,7 +595,7 @@ class _MicrochipDelegate extends _DeviceDelegate {
         owner._readService = service;
         owner._writeCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_MICROCHIP_CHAR_W;
         owner._writeService = service;
-        if(owner._services[service]?.any((c) => uuidAisaB(c, owner._writeCharacteristic!)) ?? false) {
+        if (!(owner._services[service]?.any((c) => uuidAisaB(c, owner._writeCharacteristic!)) ?? false)) {
             owner._writeCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_MICROCHIP_CHAR_RW;
             owner._writeService = service;
         }
@@ -660,22 +660,22 @@ class _TelitDelegate extends _DeviceDelegate {
         owner._writeService = service;
         _readCreditsCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_TIO_CHAR_RX_CREDITS;
         _writeCreditsCharacteristic = BleBluetoothConnection._BLUETOOTH_LE_TIO_CHAR_TX_CREDITS;
-        if (owner._services[service]?.any((c) => uuidAisaB(c, owner._readCharacteristic!)) ?? false) {
+        if (!(owner._services[service]?.any((c) => uuidAisaB(c, owner._readCharacteristic!)) ?? false)) {
             owner._onSerialConnectError(Exception("read characteristic not found"));
             log("<--_TelitDelegate.connectCharacteristics");
             return false;
         }
-        if (owner._services[service]?.any((c) => uuidAisaB(c, owner._writeCharacteristic!)) ?? false) {
+        if (!(owner._services[service]?.any((c) => uuidAisaB(c, owner._writeCharacteristic!)) ?? false)) {
             owner._onSerialConnectError(Exception("write characteristic not found"));
             log("<--_TelitDelegate.connectCharacteristics");
             return false;
         }
-        if (owner._services[service]?.any((c) => uuidAisaB(c, _readCreditsCharacteristic!)) ?? false) {
+        if (!(owner._services[service]?.any((c) => uuidAisaB(c, _readCreditsCharacteristic!)) ?? false)) {
             owner._onSerialConnectError(Exception("read credits characteristic not found"));
             log("<--_TelitDelegate.connectCharacteristics");
             return false;
         }
-        if (owner._services[service]?.any((c) => uuidAisaB(c, _writeCreditsCharacteristic!)) ?? false) {
+        if (!(owner._services[service]?.any((c) => uuidAisaB(c, _writeCreditsCharacteristic!)) ?? false)) {
             owner._onSerialConnectError(Exception("write credits characteristic not found"));
             log("<--_TelitDelegate.connectCharacteristics");
             return false;
