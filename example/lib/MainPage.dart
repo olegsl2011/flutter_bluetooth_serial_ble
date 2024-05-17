@@ -66,17 +66,17 @@ class _MainPage extends State<MainPage> {
     _name = "UNKNOWN";
 
     // Listen for futher state changes
-    FlutterBluetoothSerial.instance
-        .onStateChanged()
-        .listen((BluetoothState state) {
-      setState(() {
-        _bluetoothState = state;
-
-        // Discoverable mode is disabled when Bluetooth gets disabled
-        _discoverableTimeoutTimer = null;
-        _discoverableTimeoutSecondsLeft = 0;
-      });
-    });
+    // FlutterBluetoothSerial.instance
+    //     .onStateChanged()
+    //     .listen((BluetoothState state) {
+    //   setState(() {
+    //     _bluetoothState = state;
+    //
+    //     // Discoverable mode is disabled when Bluetooth gets disabled
+    //     _discoverableTimeoutTimer = null;
+    //     _discoverableTimeoutSecondsLeft = 0;
+    //   });
+    // });
   }
 
   @override

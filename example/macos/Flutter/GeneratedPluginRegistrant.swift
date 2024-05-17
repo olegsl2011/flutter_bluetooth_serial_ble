@@ -5,8 +5,8 @@
 import FlutterMacOS
 import Foundation
 
-import quick_blue
+import quick_blue_macos
 
 func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
-  QuickBluePlugin.register(with: registry.registrar(forPlugin: "QuickBluePlugin"))
+  QuickBlueMacosPlugin.register(with: registry.registrar(forPlugin: "QuickBlueMacosPlugin"))
 }

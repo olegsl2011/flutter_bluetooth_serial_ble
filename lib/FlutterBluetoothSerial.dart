@@ -61,22 +61,22 @@ class FlutterBluetoothSerial {
   BluetoothState _lastState = BluetoothState.UNKNOWN;
 
   /// Allows monitoring the Bluetooth adapter state changes.
-  Stream<BluetoothState> onStateChanged() => QuickBlue.availabilityChangeStream
-      .asBroadcastStream()
-      .map((event) {
-    //CHECK I'm not sure about this.  I suspect possible discrepancies between QuickBlue and this - for instance, maybe QuickBlue doesn't report classic BT.
-    //CHECK Actually, I'm not even sure the BLE states are real - they don't show up in the Android documentation....
-    //   Yeah, actually, I'm going to use e.g. STATE_ON instead of STATE_BLE_ON
-    switch (event) {
-      case AvailabilityState.unknown: return _lastState = BluetoothState.UNKNOWN;
-      case AvailabilityState.resetting: return _lastState = BluetoothState.STATE_TURNING_ON; //THINK Not sure about this conversion.
-      case AvailabilityState.unsupported: return _lastState = BluetoothState.ERROR;
-      case AvailabilityState.unauthorized: return _lastState = BluetoothState.ERROR;
-      case AvailabilityState.poweredOff: return _lastState = BluetoothState.STATE_OFF;
-      case AvailabilityState.poweredOn: return _lastState = BluetoothState.STATE_ON; //THINK ...Why are there separate states for ON and BLE_ON?  This is trepidatious.
-      default: return _lastState = BluetoothState.ERROR;
-    }
-  });
+  // Stream<BluetoothState> onStateChanged() => QuickBlue.availabilityChangeStream
+  //     .asBroadcastStream()
+  //     .map((event) {
+  //   //CHECK I'm not sure about this.  I suspect possible discrepancies between QuickBlue and this - for instance, maybe QuickBlue doesn't report classic BT.
+  //   //CHECK Actually, I'm not even sure the BLE states are real - they don't show up in the Android documentation....
+  //   //   Yeah, actually, I'm going to use e.g. STATE_ON instead of STATE_BLE_ON
+  //   switch (event) {
+  //     case AvailabilityState.unknown: return _lastState = BluetoothState.UNKNOWN;
+  //     case AvailabilityState.resetting: return _lastState = BluetoothState.STATE_TURNING_ON; //THINK Not sure about this conversion.
+  //     case AvailabilityState.unsupported: return _lastState = BluetoothState.ERROR;
+  //     case AvailabilityState.unauthorized: return _lastState = BluetoothState.ERROR;
+  //     case AvailabilityState.poweredOff: return _lastState = BluetoothState.STATE_OFF;
+  //     case AvailabilityState.poweredOn: return _lastState = BluetoothState.STATE_ON; //THINK ...Why are there separate states for ON and BLE_ON?  This is trepidatious.
+  //     default: return _lastState = BluetoothState.ERROR;
+  //   }
+  // });
 
   /// State of the Bluetooth adapter.
   /// Returns the last
