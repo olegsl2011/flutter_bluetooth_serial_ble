@@ -136,9 +136,9 @@ class BleBluetoothConnection implements SerialListener, BluetoothConnection {
     static final String _BLUETOOTH_LE_NRF_SERVICE    = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
     static final String _BLUETOOTH_LE_NRF_CHAR_RW2   = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // read on microbit, write on adafruit
     static final String _BLUETOOTH_LE_NRF_CHAR_RW3   = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
-    static final String _BLUETOOTH_LE_MICROCHIP_SERVICE    = "49535343-FE7D-4AE5-8FA9-9FAFD205E455";
-    static final String _BLUETOOTH_LE_MICROCHIP_CHAR_RW    = "49535343-1E4D-4BD9-BA61-23C647249616";
-    static final String _BLUETOOTH_LE_MICROCHIP_CHAR_W     = "49535343-8841-43F4-A8D4-ECBE34729BB3";
+    static final String _BLUETOOTH_LE_MICROCHIP_SERVICE = "0000fff0-0000-1000-8000-00805f9b34fb";
+    static final String _BLUETOOTH_LE_MICROCHIP_CHAR_RW = "0000fff1-0000-1000-8000-00805f9b34fb";
+    static final String _BLUETOOTH_LE_MICROCHIP_CHAR_W = "0000fff2-0000-1000-8000-00805f9b34fb";
 
     // https://play.google.com/store/apps/details?id=com.telit.tiosample
     // https://www.telit.com/wp-content/uploads/2017/09/TIO_Implementation_Guide_r6.pdf
