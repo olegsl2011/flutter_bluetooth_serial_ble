@@ -238,8 +238,8 @@ packages:
     description:
       path: "packages/quick_blue"
       ref: HEAD
-      resolved-ref: "3bf2b24a8372c7aa2f7eaf60d51180117ba09e86"
-      url: "https://github.com/erhannis/quick.flutter.git"
+      resolved-ref: "6a3bc974b5224a2941eb1fc02750b31ccc4d0fb2"
+      url: "https://github.com/olegsl2011/quick.flutter.git"
     source: git
     version: "0.0.1"
   quiver:
