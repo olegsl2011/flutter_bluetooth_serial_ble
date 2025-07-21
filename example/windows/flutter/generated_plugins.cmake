@@ -3,7 +3,7 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
-  quick_blue_windows
+  quick_blue
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
